@@ -6,8 +6,10 @@ import spoon.Launcher;
 import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtConditional;
+import spoon.reflect.code.CtFieldRead;
 import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLocalVariable;
+import spoon.reflect.code.CtThisAccess;
 import spoon.reflect.declaration.CtField;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtType;
@@ -16,6 +18,7 @@ import spoon.reflect.reference.CtPackageReference;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.declaration.CtImport;
 import spoon.reflect.declaration.CtImportKind;
+import spoon.reflect.reference.CtFieldReference;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -138,10 +141,10 @@ class GosuRoundTripTest {
                 + "}\n");
         write("target/test-gsrc/demo/Ctor1.gs",
                 "package demo\n"
-                + "uses java.util.*\n"
-                + "class Ctor1 {\n"
-                + "  var _nums : List<Integer>\n"
-                + "  var _map : Map<Integer, String>\n"
++ "uses java.util.*\n"
+                 + "class Ctor1 {\n"
+                 + "  public var _nums : List<Integer>\n"
+                 + "  var _map : Map<Integer, String>\n"
                 + "  construct() {\n"
                 + "    _nums = new ArrayList<Integer>()\n"
                 + "    _map = new HashMap<Integer, String>()\n"
@@ -226,8 +229,17 @@ class GosuRoundTripTest {
                 + "      print(\"done\")\n"
                 + "    }\n"
                 + "  }\n"
-                + "  function boom() {\n"
-                + "    throw new RuntimeException(\"bad\")\n"
++ "  function boom() {\n"
+                 + "    throw new RuntimeException(\"bad\")\n"
+                 + "  }\n"
+                 + "}\n");
+        write("target/test-gsrc/demo/ExtOnCtor.gsx",
+                "package demo\n"
+                + "uses demo.Ctor1\n"
+                + "uses java.util.List\n"
+                + "enhancement ExtOnCtor : Ctor1 {\n"
+                + "  function doubled() : int {\n"
+                + "    return this._nums.size() * 2\n"
                 + "  }\n"
                 + "}\n");
 
@@ -240,7 +252,8 @@ class GosuRoundTripTest {
     void bootstrapScansAllTypes() {
         assertThat(gosu.scanTypeNames(srcDir))
                 .containsExactlyInAnyOrder("demo.Greeter", "demo.StringExt",
-                        "demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey");
+                        "demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey",
+                        "demo.ExtOnCtor");
     }
 
     @Test
@@ -291,12 +304,42 @@ class GosuRoundTripTest {
         CtType<?> ext = type("demo.StringExt");
         assertThat(ext).isNotNull();
         assertThat(GosuPrettyPrinter.isGosuEnhancement(ext)).isTrue();
+        assertThat(ext.getSuperclass()).isNull();
+        assertThat(GosuPrettyPrinter.enhancedTypeOf(ext).getSimpleName()).isEqualTo("String");
+
+        List<CtThisAccess<?>> thisAccesses = ext.getElements(e -> e instanceof CtThisAccess<?>);
+        assertThat(thisAccesses).hasSize(1);
+        assertThat(thisAccesses.get(0).getType().getSimpleName()).isEqualTo("String");
 
         String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(ext);
         assertThat(text)
                 .contains("enhancement StringExt : String {")
                 .contains("function shout() : String {")
                 .contains("return this + \"!!!\"");
+    }
+
+    @Test
+    void enhancementOnUserTypeResolvesMembersOfTarget() {
+        CtType<?> ext = type("demo.ExtOnCtor");
+        assertThat(ext).isNotNull();
+        assertThat(GosuPrettyPrinter.isGosuEnhancement(ext)).isTrue();
+        assertThat(ext.getSuperclass()).isNull();
+        assertThat(GosuPrettyPrinter.enhancedTypeOf(ext).getSimpleName()).isEqualTo("Ctor1");
+
+        List<CtFieldRead<?>> fieldReads = ext.getElements(e -> e instanceof CtFieldRead<?>);
+        assertThat(fieldReads).extracting(r -> r.getVariable().getSimpleName())
+                .containsExactly("_nums");
+        assertThat(fieldReads.get(0).getType().getSimpleName()).isEqualTo("List");
+        assertThat(((CtFieldReference<?>) fieldReads.get(0).getVariable()).getDeclaringType()
+                .getSimpleName()).isEqualTo("Ctor1");
+
+        List<CtInvocation<?>> calls = ext.getElements(e -> e instanceof CtInvocation<?>);
+        assertThat(calls).hasSize(1);
+        assertThat(calls.get(0).getExecutable().getSimpleName()).isEqualTo("size");
+        assertThat(calls.get(0).getExecutable().getDeclaringType().getSimpleName()).isEqualTo("List");
+
+        String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(ext);
+        assertThat(text).contains("return this._nums.size() * 2");
     }
 
     @Test
@@ -438,7 +481,7 @@ class GosuRoundTripTest {
     @Test
     void roundTripFixpointInFreshJvm() throws Exception {
         List<CtType<?>> types = builder.buildAll(srcDir);
-        assertThat(types).hasSize(6);
+        assertThat(types).hasSize(7);
 
         File outDir = new File("target/test-roundtrip");
         deleteRecursively(outDir);

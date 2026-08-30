@@ -54,6 +54,7 @@ import gw.lang.parser.statements.IThrowStatement;
 import gw.lang.parser.statements.ITryCatchFinallyStatement;
 import gw.lang.parser.statements.IWhileStatement;
 import gw.lang.reflect.IType;
+import gw.lang.reflect.IPropertyInfo;
 import gw.lang.reflect.gs.ICompilableType;
 import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtArrayRead;
@@ -129,6 +130,12 @@ public class GosuModelBuilder {
     public static final String GOSU_KIND_ENHANCEMENT = "ENHANCEMENT";
     public static final String GOSU_KIND_CLASS = "CLASS";
 
+    /**
+     * Annotation on an enhancement Ct type carrying the {@code CtTypeReference}
+     * of the type it enhances, so analysis never sees a fake superclass.
+     */
+    public static final String GOSU_ENHANCED_TYPE_ANNOTATION = "spoon.gosu.meta.GosuEnhancedType";
+
     private static final Pattern USES_PATTERN =
             Pattern.compile("(?m)^\\s*uses\\s+([\\w.]+(?:\\.[*])?)\\s*(?://.*)?$");
 
@@ -141,6 +148,7 @@ public class GosuModelBuilder {
     private final Map<CtType<?>, List<CtImport>> typeImports = new LinkedHashMap<>();
 
     private CtClass<?> currentClass;
+    private CtTypeReference<Object> currentThisType;
     private Set<String> currentFields = new LinkedHashSet<>();
     private final Map<String, IType> currentFieldTypes = new LinkedHashMap<>();
     private List<String> currentUses = new ArrayList<>();
@@ -207,14 +215,19 @@ public class GosuModelBuilder {
         ctClass.setSimpleName(simpleName);
         addGosuKind(ctClass, enhancement);
         currentClass = ctClass;
+        currentThisType = null;
 
         if (pkgName != null) {
             CtPackage pkg = factory.Package().getOrCreate(pkgName);
             pkg.addType(ctClass);
         }
 
-        if (enhancedType != null) {
-            ctClass.setSuperclass(mapType(enhancedType));
+        if (enhancement) {
+            if (enhancedType != null) {
+                CtTypeReference<Object> enhancedRef = mapType(enhancedType);
+                addEnhancedType(ctClass, enhancedRef);
+                currentThisType = enhancedRef;
+            }
         } else {
             IGosuClassInternal superClass = gs.getSuperClass();
             if (superClass != null && !"java.lang.Object".equals(superClass.getName())) {
@@ -234,6 +247,9 @@ public class GosuModelBuilder {
             fields.putIfAbsent(staticField.getIdentifierName(), staticField);
         }
         currentFields = new LinkedHashSet<>(fields.keySet());
+        if (enhancement && enhancedType != null) {
+            addEnhancedTypeFields(enhancedType);
+        }
         for (gw.internal.gosu.parser.statements.VarStatement field : fields.values()) {
             if (field.isEnumConstant()) {
                 continue;
@@ -260,9 +276,42 @@ public class GosuModelBuilder {
         }
 
         currentClass = null;
+        currentThisType = null;
         currentFields = new LinkedHashSet<>();
         currentUses = new ArrayList<>();
         return ctClass;
+    }
+
+    private void addEnhancedTypeFields(IType enhancedType) {
+        if (enhancedType instanceof IGosuClassInternal) {
+            IGosuClassInternal gs = (IGosuClassInternal) enhancedType;
+            Map<String, gw.internal.gosu.parser.statements.VarStatement> fields =
+                    new LinkedHashMap<>(gs.getParseInfo().getMemberFields());
+            for (gw.internal.gosu.parser.statements.VarStatement staticField
+                    : gs.getParseInfo().getStaticFields().values()) {
+                fields.putIfAbsent(staticField.getIdentifierName(), staticField);
+            }
+            for (gw.internal.gosu.parser.statements.VarStatement field : fields.values()) {
+                if (!field.isEnumConstant() && currentFields.add(field.getIdentifierName())
+                        && field.getSymbol() != null) {
+                    currentFieldTypes.put(field.getIdentifierName(), field.getSymbol().getType());
+                }
+            }
+        } else {
+            for (IPropertyInfo property : enhancedType.getTypeInfo().getProperties()) {
+                if (property.isReadable() && currentFields.add(property.getName())) {
+                    currentFieldTypes.put(property.getName(), property.getFeatureType());
+                }
+            }
+        }
+    }
+
+    private void addEnhancedType(CtClass<?> ctType, CtTypeReference<Object> enhancedType) {
+        CtTypeReference<Annotation> ref =
+                factory.Type().createReference(GOSU_ENHANCED_TYPE_ANNOTATION);
+        CtAnnotation<Annotation> marker = factory.createAnnotation(ref);
+        marker.addValue("value", enhancedType.getQualifiedName());
+        ctType.addAnnotation(marker);
     }
 
     private void addGosuKind(CtClass<?> ctType, boolean enhancement) {
@@ -650,8 +699,8 @@ public class GosuModelBuilder {
             String name = symbol == null ? null : symbol.getName();
             if ("this".equals(name)) {
                 CtExpression<Object> thisAccess =
-                        factory.createThisAccess(currentTypeRef(), false);
-                thisAccess.setType(currentTypeRef());
+                        factory.createThisAccess(thisTypeRef(), false);
+                thisAccess.setType(thisTypeRef());
                 return thisAccess;
             }
             boolean field = name != null
@@ -759,7 +808,7 @@ public class GosuModelBuilder {
         gw.lang.parser.IExpression root = bean.getRootExpression();
         CtTypeReference<Object> declaring = isThis(root) || root == null
                 || root.getType() == null
-                ? currentTypeRef()
+                ? thisTypeRef()
                 : mapType(root.getType());
         CtExecutableReference<Object> ref = factory.Executable().createReference(
                 declaring,
@@ -779,7 +828,7 @@ public class GosuModelBuilder {
         String name = call.getFunctionSymbol() == null
                 ? null : call.getFunctionSymbol().getDisplayName();
         CtExecutableReference<Object> ref = factory.Executable().createReference(
-                currentTypeRef(),
+                thisTypeRef(),
                 mapType(call.getType()),
                 name == null ? "call" : name);
         List<CtExpression<?>> args = new ArrayList<>();
@@ -797,7 +846,7 @@ public class GosuModelBuilder {
         ISymbol symbol = id.getSymbol();
         String name = symbol == null ? null : symbol.getName();
         if ("this".equals(name)) {
-            return factory.createThisAccess(currentTypeRef(), false);
+            return factory.createThisAccess(thisTypeRef(), false);
         }
         if (name != null && currentFields.contains(name)) {
             return fieldAccess(name, true);
@@ -816,7 +865,7 @@ public class GosuModelBuilder {
 
     private CtExpression<Object> fieldAccess(String name, boolean write) {
         CtFieldReference<Object> ref = factory.Field().createReference(
-                currentTypeRef(), mapType(currentFieldTypes.get(name)), name);
+                thisTypeRef(), mapType(currentFieldTypes.get(name)), name);
         return variableAccess(ref, write);
     }
 
@@ -826,14 +875,14 @@ public class GosuModelBuilder {
         gw.lang.parser.IExpression root = member.getRootExpression();
         CtTypeReference<Object> declaring = isThis(root) || root == null
                 || root.getType() == null
-                ? currentTypeRef()
+                ? thisTypeRef()
                 : mapType(root.getType());
         CtFieldReference<Object> ref = factory.Field().createReference(
                 declaring, mapType(member.getType()), member.getMemberName());
         CtExpression<Object> access = variableAccess(ref, write);
         if (root != null && isThis(root)) {
             ((spoon.reflect.code.CtFieldAccess<Object>) (CtExpression<?>) access)
-                    .setTarget(factory.createThisAccess(currentTypeRef(), false));
+                    .setTarget(factory.createThisAccess(thisTypeRef(), false));
         } else if (root != null) {
             ((spoon.reflect.code.CtFieldAccess<Object>) (CtExpression<?>) access)
                     .setTarget(mapExpression(root, context == null ? access : context));
@@ -876,6 +925,11 @@ public class GosuModelBuilder {
             case ">=": return BinaryOperatorKind.GE;
             default: return BinaryOperatorKind.EQ;
         }
+    }
+
+    /** The type {@code this} refers to: the enhanced type in an enhancement body. */
+    private CtTypeReference<Object> thisTypeRef() {
+        return currentThisType != null ? currentThisType : currentTypeRef();
     }
 
     private CtTypeReference<Object> currentTypeRef() {

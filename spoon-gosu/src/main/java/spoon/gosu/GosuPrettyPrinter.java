@@ -59,7 +59,9 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
             w.writeSpace();
             w.writeIdentifier(stripLeadingDigits(type.getSimpleName()));
 
-            CtTypeReference<?> superclass = type.getSuperclass();
+            CtTypeReference<?> superclass = enhancement
+                    ? enhancedTypeOf(type)
+                    : type.getSuperclass();
             if (superclass != null && !"java.lang.Object".equals(superclass.getQualifiedName())) {
                 w.writeSeparator(" : ");
                 scan(superclass);
@@ -287,6 +289,26 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
             }
         }
         return false;
+    }
+
+    /** The enhanced type reference of an enhancement Ct type, or null. */
+    public static CtTypeReference<?> enhancedTypeOf(CtType<?> type) {
+        if (type == null) {
+            return null;
+        }
+        for (CtAnnotation<?> annotation : type.getAnnotations()) {
+            if (GosuModelBuilder.GOSU_ENHANCED_TYPE_ANNOTATION.equals(
+                    annotation.getAnnotationType().getQualifiedName())) {
+                Object value = annotation.getValue("value");
+                if (value instanceof spoon.reflect.code.CtLiteral<?>) {
+                    value = ((spoon.reflect.code.CtLiteral<?>) value).getValue();
+                }
+                if (value != null) {
+                    return type.getFactory().Type().createReference(String.valueOf(value));
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean isVoid(CtTypeReference<?> type) {
