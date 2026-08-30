@@ -3,6 +3,7 @@ package spoon.gosu;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import spoon.Launcher;
+import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtAssert;
 import spoon.reflect.code.CtBinaryOperator;
@@ -12,7 +13,9 @@ import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLocalVariable;
+import spoon.reflect.code.CtReturn;
 import spoon.reflect.code.CtThisAccess;
+import spoon.reflect.code.CtTryWithResource;
 import spoon.reflect.declaration.CtAnnotation;
 import spoon.reflect.declaration.CtAnnotationType;
 import spoon.reflect.declaration.CtElement;
@@ -397,6 +400,39 @@ class GosuRoundTripTest {
 				+ "    return p\n"
 				+ "  }\n"
 				+ "}\n");
+		write("target/test-gsrc/demo/SpecialCases.gs",
+				"package demo\n"
+				+ "uses java.io.StringReader\n"
+				+ "uses java.io.Reader\n"
+				+ "class SpecialCases {\n"
+				+ "  function testUsing() {\n"
+				+ "    using (var r = new StringReader(\"hello\")) {\n"
+				+ "      var x = r.read()\n"
+				+ "    }\n"
+				+ "  }\n"
+				+ "  function testUsingExpr(r : Reader) {\n"
+				+ "    using (r) {\n"
+				+ "      var x = r.read()\n"
+				+ "    }\n"
+				+ "  }\n"
+				+ "  function testTypeIs(obj : Object) : boolean {\n"
+				+ "    return obj typeis String\n"
+				+ "  }\n"
+				+ "  function testTypeOf(obj : Object) : Type {\n"
+				+ "    return typeof obj\n"
+				+ "  }\n"
+				+ "  function testTypeAs(obj : Object) : String {\n"
+				+ "    return obj as String\n"
+				+ "  }\n"
+				+ "  function testInterval() {\n"
+				+ "    for (i in 0..10) {\n"
+				+ "      print(i)\n"
+				+ "    }\n"
+				+ "  }\n"
+				+ "  function testEval() : Object {\n"
+				+ "    return eval(\"1 + 2\")\n"
+				+ "  }\n"
+				+ "}\n");
 
 		gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
 		factory = new Launcher().getFactory();
@@ -411,7 +447,7 @@ class GosuRoundTripTest {
 						"demo.ExtOnCtor", "demo.Funcs", "demo.Optional", "demo.Misc",
 						"demo.Named", "demo.Color", "demo.HasProps", "demo.Structy",
 						"demo.Box", "demo.MultiBound", "demo.Container", "demo.Pair",
-						"demo.Tag", "demo.AnnoDemo");
+						"demo.Tag", "demo.AnnoDemo", "demo.SpecialCases");
 	}
 
 	@Test
@@ -682,7 +718,7 @@ class GosuRoundTripTest {
 				.contains("function check(n : int) {")
 				.contains("assert n > 0 : \"n must be positive\"")
 				.contains("using (new StringWriter()) {")
-				.contains("print(_items.size())")
+				.contains("print(this._items.size())")
 				.contains("function sum() : int {")
 				.contains("for (i in 0..|_items.size()) {")
 				.contains("total = total + i");
@@ -880,6 +916,52 @@ class GosuRoundTripTest {
 	}
 
 	@Test
+	void specializedGosuConstructs() {
+		CtType<?> spec = type("demo.SpecialCases");
+		assertThat(spec).isNotNull();
+
+		CtMethod<?> testUsing = spec.getMethodsByName("testUsing").get(0);
+		assertThat(testUsing.getBody().getStatements().get(0)).isInstanceOf(CtTryWithResource.class);
+		CtTryWithResource using1 = (CtTryWithResource) testUsing.getBody().getStatements().get(0);
+		assertThat(using1.getResources()).hasSize(1);
+		assertThat(using1.getResources().get(0)).isInstanceOf(CtLocalVariable.class);
+
+		CtMethod<?> testUsingExpr = spec.getMethodsByName("testUsingExpr").get(0);
+		assertThat(testUsingExpr.getBody().getStatements().get(0)).isInstanceOf(CtTryWithResource.class);
+		CtTryWithResource using2 = (CtTryWithResource) testUsingExpr.getBody().getStatements().get(0);
+		assertThat(using2.getResources()).hasSize(1);
+
+		CtMethod<?> testTypeIs = spec.getMethodsByName("testTypeIs").get(0);
+		CtReturn<?> retIs = (CtReturn<?>) testTypeIs.getBody().getStatements().get(0);
+		assertThat(retIs.getReturnedExpression()).isInstanceOf(CtBinaryOperator.class);
+		assertThat(((CtBinaryOperator<?>) retIs.getReturnedExpression()).getKind()).isEqualTo(BinaryOperatorKind.INSTANCEOF);
+
+		CtMethod<?> testTypeOf = spec.getMethodsByName("testTypeOf").get(0);
+		CtReturn<?> retOf = (CtReturn<?>) testTypeOf.getBody().getStatements().get(0);
+		assertThat(retOf.getReturnedExpression()).isInstanceOf(CtInvocation.class);
+		assertThat(((CtInvocation<?>) retOf.getReturnedExpression()).getExecutable().getSimpleName()).isEqualTo("typeof");
+
+		CtMethod<?> testTypeAs = spec.getMethodsByName("testTypeAs").get(0);
+		CtReturn<?> retAs = (CtReturn<?>) testTypeAs.getBody().getStatements().get(0);
+		assertThat(retAs.getReturnedExpression().getTypeCasts()).hasSize(1);
+
+		CtMethod<?> testEval = spec.getMethodsByName("testEval").get(0);
+		CtReturn<?> retEval = (CtReturn<?>) testEval.getBody().getStatements().get(0);
+		assertThat(retEval.getReturnedExpression()).isInstanceOf(CtInvocation.class);
+		assertThat(((CtInvocation<?>) retEval.getReturnedExpression()).getExecutable().getSimpleName()).isEqualTo("eval");
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(spec);
+		assertThat(text)
+				.contains("using (var r : StringReader = new StringReader( \"hello\" )) {")
+				.contains("using (r) {")
+				.contains("return obj typeis String")
+				.contains("return typeof obj")
+				.contains("return (obj as String)")
+				.contains("for (i in 0..10) {")
+				.contains("return eval(\"1 + 2\")");
+	}
+
+	@Test
 	void transformDemo() {
 		CtType<?> greeter = type("demo.Greeter");
 		CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
@@ -899,7 +981,7 @@ class GosuRoundTripTest {
 	@Test
 	void roundTripFixpointInFreshJvm() throws Exception {
 		List<CtType<?>> types = builder.buildAll(srcDir);
-		assertThat(types).hasSize(20);
+		assertThat(types).hasSize(21);
 
 		File outDir = new File("target/test-roundtrip");
 		deleteRecursively(outDir);

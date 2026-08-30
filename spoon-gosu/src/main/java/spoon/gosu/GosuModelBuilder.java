@@ -78,6 +78,7 @@ import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtAssert;
 import spoon.reflect.code.CtAssignment;
+import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtCase;
 import spoon.reflect.code.CtCatch;
@@ -87,15 +88,18 @@ import spoon.reflect.code.CtDo;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtForEach;
 import spoon.reflect.code.CtIf;
+import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtNewArray;
+import spoon.reflect.code.CtResource;
 import spoon.reflect.code.CtReturn;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.code.CtSwitch;
 import spoon.reflect.code.CtThrow;
 import spoon.reflect.code.CtTry;
+import spoon.reflect.code.CtTryWithResource;
 import spoon.reflect.code.CtUnaryOperator;
 import spoon.reflect.code.CtVariableAccess;
 import spoon.reflect.code.CtWhile;
@@ -743,6 +747,38 @@ public class GosuModelBuilder {
 			}
 			return ctAssert;
 		}
+		if (el instanceof gw.internal.gosu.parser.statements.UsingStatement) {
+			gw.internal.gosu.parser.statements.UsingStatement us =
+					(gw.internal.gosu.parser.statements.UsingStatement) el;
+			CtTryWithResource ctTry = factory.createTryWithResource();
+			if (us.getVarStatements() != null) {
+				for (IStatement v : us.getVarStatements()) {
+					CtStatement mapped = mapStatementTree(v, ctTry);
+					if (mapped instanceof CtLocalVariable<?>) {
+						ctTry.addResource((CtLocalVariable<?>) mapped);
+					}
+				}
+			}
+			if (us.getExpression() != null) {
+				CtExpression<?> expr = mapExpression(us.getExpression(), ctTry);
+				if (expr instanceof CtResource<?>) {
+					ctTry.addResource((CtResource<?>) expr);
+				} else if (expr != null) {
+					CtLocalVariable<Object> wrap = factory.createLocalVariable();
+					wrap.setImplicit(true);
+					wrap.setDefaultExpression(cast(expr));
+					wrap.setType(expr.getType());
+					ctTry.addResource(wrap);
+				}
+			}
+			ctTry.setBody(mapBodyOrStatement(us.getStatement(), ctTry));
+			return ctTry;
+		}
+		if (el instanceof gw.internal.gosu.parser.statements.EvalStatement) {
+			gw.internal.gosu.parser.statements.EvalStatement es =
+					(gw.internal.gosu.parser.statements.EvalStatement) el;
+			return asStatementExpression(mapExpression(es.getEvalExpression(), context));
+		}
 		if (el instanceof IUsingStatement) {
 			return factory.createCodeSnippetStatement(sourceSlice(el));
 		}
@@ -812,6 +848,49 @@ public class GosuModelBuilder {
 		}
 		if (el instanceof IImplicitTypeAsExpression) {
 			return mapExpression(((ITypeAsExpression) el).getLHS(), context);
+		}
+		if (el instanceof gw.internal.gosu.parser.expressions.TypeIsExpression) {
+			gw.internal.gosu.parser.expressions.TypeIsExpression tis =
+					(gw.internal.gosu.parser.expressions.TypeIsExpression) el;
+			CtBinaryOperator<Boolean> bin = factory.createBinaryOperator();
+			bin.setKind(BinaryOperatorKind.INSTANCEOF);
+			bin.setLeftHandOperand(cast(mapExpression(tis.getLHS(), bin)));
+			IType rhsType = tis.getRHS().getType();
+			if (rhsType instanceof gw.lang.reflect.IMetaType) {
+				rhsType = ((gw.lang.reflect.IMetaType) rhsType).getType();
+			}
+			bin.setRightHandOperand(factory.Code().createTypeAccess(mapType(rhsType)));
+			bin.setType(factory.Type().booleanPrimitiveType());
+			return cast(bin);
+		}
+		if (el instanceof gw.internal.gosu.parser.expressions.TypeOfExpression) {
+			gw.internal.gosu.parser.expressions.TypeOfExpression tof =
+					(gw.internal.gosu.parser.expressions.TypeOfExpression) el;
+			CtInvocation<Object> inv = factory.createInvocation();
+			CtExecutableReference<Object> ref = factory.createExecutableReference();
+			ref.setSimpleName("typeof");
+			inv.setExecutable(ref);
+			inv.addArgument(cast(mapExpression(tof.getExpression(), inv)));
+			inv.setType(mapType(tof.getType()));
+			return inv;
+		}
+		if (el instanceof gw.internal.gosu.parser.expressions.TypeAsExpression) {
+			gw.internal.gosu.parser.expressions.TypeAsExpression tas =
+					(gw.internal.gosu.parser.expressions.TypeAsExpression) el;
+			CtExpression<Object> expr = cast(mapExpression(tas.getLHS(), context));
+			expr.addTypeCast(mapType(tas.getType()));
+			return expr;
+		}
+		if (el instanceof gw.internal.gosu.parser.expressions.EvalExpression) {
+			gw.internal.gosu.parser.expressions.EvalExpression ev =
+					(gw.internal.gosu.parser.expressions.EvalExpression) el;
+			CtInvocation<Object> inv = factory.createInvocation();
+			CtExecutableReference<Object> ref = factory.createExecutableReference();
+			ref.setSimpleName("eval");
+			inv.setExecutable(ref);
+			inv.addArgument(cast(mapExpression(ev.getExpression(), inv)));
+			inv.setType(mapType(ev.getType()));
+			return inv;
 		}
 		if (el instanceof IIntervalExpression) {
 			CtExpression<Object> slice = snippet(sourceSlice(el));

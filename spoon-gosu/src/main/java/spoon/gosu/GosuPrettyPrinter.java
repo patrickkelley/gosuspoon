@@ -8,16 +8,20 @@
 package spoon.gosu;
 
 import spoon.compiler.Environment;
+import spoon.reflect.code.BinaryOperatorKind;
+import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtCase;
 import spoon.reflect.code.CtCatch;
 import spoon.reflect.code.CtCatchVariable;
 import spoon.reflect.code.CtConstructorCall;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtForEach;
+import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtNewArray;
 import spoon.reflect.code.CtStatement;
+import spoon.reflect.code.CtTryWithResource;
 import spoon.reflect.declaration.CtAnnotation;
 import spoon.reflect.declaration.CtAnnotationType;
 import spoon.reflect.declaration.CtClass;
@@ -34,18 +38,23 @@ import spoon.reflect.declaration.CtTypeParameter;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.visitor.DefaultJavaPrettyPrinter;
 import spoon.reflect.visitor.TokenWriter;
+import spoon.reflect.visitor.printer.CommentOffset;
 
 import java.lang.annotation.Annotation;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 
 /**
-* A Spoon pretty-printer that emits Gosu instead of Java: types are
-* {@code class}/{@code enhancement}, fields are {@code var name : type},
-* functions are {@code function name(..) : type} and statements carry no
-* trailing semicolons.
-*/
+ * A Spoon pretty-printer that emits Gosu instead of Java: types are
+ * {@code class}/{@code enhancement}, fields are {@code var name : type},
+ * functions are {@code function name(..) : type} and statements carry no
+ * trailing semicolons.
+ */
 public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
+
+	private final Deque<CtExpression<?>> gosuParenthesed = new ArrayDeque<>();
 
 	public GosuPrettyPrinter(Environment env) {
 		super(env);
@@ -347,6 +356,124 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeSeparator(")");
 		w.writeSpace();
 		scan(ctCatch.getBody());
+	}
+
+	@Override
+	public void visitCtTryWithResource(CtTryWithResource tryWithResource) {
+		enterCtStatement(tryWithResource);
+		TokenWriter w = getPrinterTokenWriter();
+		w.writeKeyword("using");
+		w.writeSpace();
+		w.writeSeparator("(");
+		for (int i = 0; i < tryWithResource.getResources().size(); i++) {
+			printResource(tryWithResource.getResources().get(i));
+			if (i < tryWithResource.getResources().size() - 1) {
+				w.writeSeparator(", ");
+			}
+		}
+		w.writeSeparator(")");
+		w.writeSpace();
+		scan(tryWithResource.getBody());
+		exitCtStatement(tryWithResource);
+	}
+
+	private void printResource(CtElement res) {
+		if (res instanceof CtLocalVariable<?>) {
+			CtLocalVariable<?> lv = (CtLocalVariable<?>) res;
+			if (lv.getSimpleName() == null || lv.getSimpleName().isEmpty() || lv.isImplicit()) {
+				scan(lv.getDefaultExpression());
+				return;
+			}
+			TokenWriter w = getPrinterTokenWriter();
+			w.writeKeyword("var");
+			w.writeSpace();
+			w.writeIdentifier(lv.getSimpleName());
+			if (lv.getType() != null) {
+				w.writeSpace();
+				w.writeSeparator(":");
+				w.writeSpace();
+				scan(lv.getType());
+			}
+			if (lv.getDefaultExpression() != null) {
+				w.writeSpace();
+				w.writeOperator("=");
+				w.writeSpace();
+				scan(lv.getDefaultExpression());
+			}
+		} else {
+			scan(res);
+		}
+	}
+
+	@Override
+	public <T> void visitCtBinaryOperator(CtBinaryOperator<T> operator) {
+		if (operator.getKind() == BinaryOperatorKind.INSTANCEOF) {
+			enterCtExpression(operator);
+			scan(operator.getLeftHandOperand());
+			TokenWriter w = getPrinterTokenWriter();
+			w.writeSpace();
+			w.writeKeyword("typeis");
+			w.writeSpace();
+			scan(operator.getRightHandOperand());
+			exitCtExpression(operator);
+			return;
+		}
+		super.visitCtBinaryOperator(operator);
+	}
+
+	@Override
+	public <T> void visitCtInvocation(CtInvocation<T> invocation) {
+		if (invocation.getTarget() == null && invocation.getExecutable() != null) {
+			String name = invocation.getExecutable().getSimpleName();
+			if ("typeof".equals(name) && invocation.getArguments().size() == 1) {
+				enterCtStatement(invocation);
+				enterCtExpression(invocation);
+				TokenWriter w = getPrinterTokenWriter();
+				w.writeKeyword("typeof");
+				w.writeSpace();
+				scan(invocation.getArguments().get(0));
+				exitCtExpression(invocation);
+				exitCtStatement(invocation);
+				return;
+			}
+		}
+		super.visitCtInvocation(invocation);
+	}
+
+	@Override
+	protected void enterCtExpression(CtExpression<?> e) {
+		if (e.getTypeCasts().isEmpty()) {
+			super.enterCtExpression(e);
+			return;
+		}
+		if (!(e instanceof CtStatement)) {
+			getElementPrinterHelper().writeComment(e, CommentOffset.BEFORE);
+		}
+		getPrinterTokenWriter().getPrinterHelper().mapLine(e, sourceCompilationUnit);
+		gosuParenthesed.push(e);
+		getPrinterTokenWriter().writeSeparator("(");
+	}
+
+	@Override
+	protected void exitCtExpression(CtExpression<?> e) {
+		if (e.getTypeCasts().isEmpty()) {
+			super.exitCtExpression(e);
+			return;
+		}
+		TokenWriter w = getPrinterTokenWriter();
+		for (CtTypeReference<?> cast : e.getTypeCasts()) {
+			w.writeSpace();
+			w.writeKeyword("as");
+			w.writeSpace();
+			scan(cast);
+		}
+		if (!gosuParenthesed.isEmpty() && e == gosuParenthesed.peek()) {
+			gosuParenthesed.pop();
+			w.writeSeparator(")");
+		}
+		if (!(e instanceof CtStatement)) {
+			getElementPrinterHelper().writeComment(e, CommentOffset.AFTER);
+		}
 	}
 
 	/** Gosu blocks are written {@code \ x : int -> expr} (not Java lambdas). */
