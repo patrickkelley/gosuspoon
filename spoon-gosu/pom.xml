@@ -1,20 +1,34 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright (C) 2006-2019 INRIA and contributors
+
+    Spoon is available either under the terms of the MIT License (see LICENSE-MIT.txt) of the Cecill-C License (see LICENSE-CECILL-C.txt).
+    You as the user are entitled to choose the terms under which to adopt Spoon.
+
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>fr.inria.gforge.spoon</groupId>
         <artifactId>spoon-pom</artifactId>
+        <groupId>fr.inria.gforge.spoon</groupId>
         <version>11.2.0</version>
-        <relativePath/>
+        <relativePath>../spoon-pom</relativePath>
     </parent>
 
     <artifactId>spoon-gosu</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <version>11.5.1-SNAPSHOT</version>
     <name>Spoon Gosu</name>
-    <description>Spoon support for the Gosu programming language.</description>
-    <url>https://github.com/patrickkelley/gosuspoon</url>
+    <description>A Gosu parsing front end for Spoon, backed by the Gosu compiler.</description>
+    <url>https://spoon.gforge.inria.fr/</url>
+    <scm>
+        <url>https://github.com/INRIA/spoon/tree/${project.scm.tag}/spoon-gosu</url>
+        <connection>scm:git:https://github.com/INRIA/spoon.git</connection>
+        <developerConnection>scm:git:ssh://github.com/INRIA/spoon.git</developerConnection>
+        <tag>v${project.version}</tag>
+    </scm>
 
     <properties>
         <gosu.version>1.17.13</gosu.version>
@@ -24,41 +38,60 @@
         <dependency>
             <groupId>fr.inria.gforge.spoon</groupId>
             <artifactId>spoon-core</artifactId>
-            <version>11.5.1-SNAPSHOT</version>
+            <version>${version}</version>
         </dependency>
         <dependency>
             <groupId>org.gosu-lang.gosu</groupId>
             <artifactId>gosu-core</artifactId>
             <version>${gosu.version}</version>
         </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-engine</artifactId>
-            <version>6.1.3</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.platform</groupId>
-            <artifactId>junit-platform-launcher</artifactId>
-            <version>6.1.3</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <version>3.27.7</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
         <plugins>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
+                <groupId>com.mycila</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <version>5.1.2</version>
                 <configuration>
-                    <trimStackTrace>false</trimStackTrace>
+                    <licenseSets>
+                        <licenseSet>
+                            <header>../LICENSE-short.txt</header>
+                            <includes>
+                                <include>src/main/java/**</include>
+                            </includes>
+                        </licenseSet>
+                    </licenseSets>
+                    <excludes>
+                        <exclude>src/main/java/spoon/javadoc/internal/*</exclude>
+                    </excludes>
                 </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <failsOnError>true</failsOnError>
+                    <consoleOutput>true</consoleOutput>
+                    <configLocation>../checkstyle.xml</configLocation>
+                    <suppressionsLocation>../checkstyle-suppressions.xml</suppressionsLocation>
+                </configuration>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>checkstyle</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

@@ -21,6 +21,7 @@
 
     <modules>
         <module>../spoon-javadoc</module>
+        <module>../spoon-gosu</module>
         <module>..</module>
     </modules>
 

@@ -139,6 +139,11 @@
             mvn -q test
             mvn -q checkstyle:checkstyle license:check
             popd || exit 1
+
+            pushd spoon-gosu || exit 1
+            mvn -q test
+            mvn -q checkstyle:checkstyle license:check
+            popd || exit 1
           '');
           extraRemote = pkgs.writeScriptBin "extra-remote" ''
             set -eu

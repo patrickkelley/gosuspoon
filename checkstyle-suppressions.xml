@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<suppressions>
+    <!--
+        spoon-gosu deliberately uses Gosu compiler internals
+        (gw.internal.gosu.parser: IGosuClassInternal, DynamicFunctionSymbol, ...),
+        which the shared IllegalImport rule would otherwise reject.
+    -->
+    <suppress files="[\\/]spoon-gosu[\\/]src[\\/]main[\\/]" checks="IllegalImport"/>
+</suppressions>

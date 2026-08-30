@@ -12,12 +12,12 @@ Spoon is an open-source library to analyze, rewrite, transform, transpile Java s
 
 This fork adds the `spoon-gosu` module: a Spoon frontend for the [Gosu](https://gosu-lang.org) language. It parses `.gs` (classes) and `.gsx` (enhancements) through the Gosu compiler, builds a standard Spoon `Ct` metamodel, and pretty-prints it back as valid Gosu, so all of Spoon's analysis and transformation API works on Gosu sources.
 
-Build and test it after installing Spoon locally (the module depends on `spoon-core` and the `spoon-pom` parent):
+### Build and test
+
+`spoon-gosu` is wired into the `spoon-pom` reactor, so it builds and tests with the rest of the modules (and is covered by the CI `test`/`extra` jobs, including checkstyle and license-header checks):
 
 ```
-mvn install -DskipTests      # build & install Spoon (spoon-core) in the local repo
-cd spoon-gosu
-mvn test
+mvn -f spoon-pom test
 ```
 
 ### Command-line usage
