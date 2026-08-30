@@ -238,113 +238,125 @@ public class GosuModelBuilder {
 				? ((IGosuEnhancementInternal) gosuClass).getEnhancedType()
 				: null;
 
-		CtType<?> ctType;
-		if (gs.isEnum()) {
-			@SuppressWarnings("rawtypes")
-			CtEnum ctEnum = factory.createEnum();
-			for (String constant : gs.getEnumConstants()) {
-				@SuppressWarnings("rawtypes")
-				CtEnumValue ev = factory.createEnumValue();
-				ev.setSimpleName(constant);
-				ctEnum.addEnumValue(ev);
-			}
-			ctType = ctEnum;
-		} else if (gs.isAnnotation()) {
-			@SuppressWarnings("rawtypes")
-			CtAnnotationType ctAnno = factory.createAnnotationType();
-			ctType = ctAnno;
-		} else if (gs.isStructure()) {
-			CtInterface<Object> ctStruct = factory.createInterface();
-			addGosuKind(ctStruct, GOSU_KIND_STRUCTURE);
-			ctType = ctStruct;
-		} else if (gs.isInterface()) {
-			ctType = factory.createInterface();
-		} else {
-			CtClass<Object> ctClass = factory.createClass();
-			addGosuKind(ctClass, enhancement ? GOSU_KIND_ENHANCEMENT : GOSU_KIND_CLASS);
-			ctType = ctClass;
-		}
-
-		ctType.setSimpleName(simpleName);
-		if (gs.getGenericTypeVariables() != null) {
-			for (IGenericTypeVariable gtv : gs.getGenericTypeVariables()) {
-				ctType.addFormalCtTypeParameter(buildTypeParameter(gtv));
-			}
-		}
-		if (gs.getModifierInfo() != null) {
-			addAnnotations(gs.getModifierInfo(), ctType);
-		}
-		currentClass = ctType;
-		currentThisType = null;
-
-		if (pkgName != null) {
-			CtPackage pkg = factory.Package().getOrCreate(pkgName);
-			pkg.addType(ctType);
-		}
-
-		if (enhancement) {
-			if (enhancedType != null) {
-				CtTypeReference<Object> enhancedRef = mapType(enhancedType);
-				addEnhancedType(ctType, enhancedRef);
-				currentThisType = enhancedRef;
-			}
-		} else if (ctType instanceof CtClass<?>) {
-			IGosuClassInternal superClass = gs.getSuperClass();
-			if (superClass != null && !"java.lang.Object".equals(superClass.getName())) {
-				((CtClass<?>) ctType).setSuperclass(
-						factory.Type().createReference(superClass.getName()));
-			}
-		}
-
-		currentUses = captureUses(gs.getSource());
-		currentSource = gs.getSource();
-		typeImports.put(ctType, buildImports(currentUses));
-
-		// members
-		Map<String, gw.internal.gosu.parser.statements.VarStatement> fields =
-				new LinkedHashMap<>(gs.getParseInfo().getMemberFields());
-		for (gw.internal.gosu.parser.statements.VarStatement staticField
-				: gs.getParseInfo().getStaticFields().values()) {
-			fields.putIfAbsent(staticField.getIdentifierName(), staticField);
-		}
-		currentFields = new LinkedHashSet<>(fields.keySet());
-		if (enhancement && enhancedType != null) {
-			addEnhancedTypeFields(enhancedType);
-		}
-		for (gw.internal.gosu.parser.statements.VarStatement field : fields.values()) {
-			if (field.isEnumConstant()) {
-				continue;
-			}
-			ctType.addField(buildField(field));
-			if (field.getSymbol() != null) {
-				currentFieldTypes.put(
-						field.getIdentifierName(), field.getSymbol().getType());
-			}
-		}
-
-		if (ctType instanceof CtClass<?>) {
-			for (DynamicFunctionSymbol dfs : gs.getConstructorFunctions()) {
-				IFunctionStatement decl = dfs.getDeclFunctionStmt();
-				if (decl != null) {
-					@SuppressWarnings({"rawtypes", "unchecked"})
-					CtClass rawClass = (CtClass) ctType;
-					rawClass.addConstructor(buildConstructor(dfs, decl));
-				}
-			}
-		}
-
-		for (DynamicFunctionSymbol dfs : gs.getParseInfo().getMemberFunctions().values()) {
-			IFunctionStatement decl = dfs.getDeclFunctionStmt();
-			if (decl != null) {
-				ctType.addMethod(buildMethod(dfs, decl));
-			}
-		}
-
 		currentClass = null;
 		currentThisType = null;
-		currentFields = new LinkedHashSet<>();
-		currentUses = new ArrayList<>();
-		return ctType;
+		currentFields.clear();
+		currentFieldTypes.clear();
+		currentUses.clear();
+		currentSource = null;
+
+		try {
+			CtType<?> ctType;
+			if (gs.isEnum()) {
+				@SuppressWarnings("rawtypes")
+				CtEnum ctEnum = factory.createEnum();
+				for (String constant : gs.getEnumConstants()) {
+					@SuppressWarnings("rawtypes")
+					CtEnumValue ev = factory.createEnumValue();
+					ev.setSimpleName(constant);
+					ctEnum.addEnumValue(ev);
+				}
+				ctType = ctEnum;
+			} else if (gs.isAnnotation()) {
+				@SuppressWarnings("rawtypes")
+				CtAnnotationType ctAnno = factory.createAnnotationType();
+				ctType = ctAnno;
+			} else if (gs.isStructure()) {
+				CtInterface<Object> ctStruct = factory.createInterface();
+				addGosuKind(ctStruct, GOSU_KIND_STRUCTURE);
+				ctType = ctStruct;
+			} else if (gs.isInterface()) {
+				ctType = factory.createInterface();
+			} else {
+				CtClass<Object> ctClass = factory.createClass();
+				addGosuKind(ctClass, enhancement ? GOSU_KIND_ENHANCEMENT : GOSU_KIND_CLASS);
+				ctType = ctClass;
+			}
+
+			ctType.setSimpleName(simpleName);
+			if (gs.getGenericTypeVariables() != null) {
+				for (IGenericTypeVariable gtv : gs.getGenericTypeVariables()) {
+					ctType.addFormalCtTypeParameter(buildTypeParameter(gtv));
+				}
+			}
+			if (gs.getModifierInfo() != null) {
+				addAnnotations(gs.getModifierInfo(), ctType);
+			}
+			currentClass = ctType;
+			currentThisType = null;
+
+			if (pkgName != null) {
+				CtPackage pkg = factory.Package().getOrCreate(pkgName);
+				pkg.addType(ctType);
+			}
+
+			if (enhancement) {
+				if (enhancedType != null) {
+					CtTypeReference<Object> enhancedRef = mapType(enhancedType);
+					addEnhancedType(ctType, enhancedRef);
+					currentThisType = enhancedRef;
+				}
+			} else if (ctType instanceof CtClass<?>) {
+				IGosuClassInternal superClass = gs.getSuperClass();
+				if (superClass != null && !"java.lang.Object".equals(superClass.getName())) {
+					((CtClass<?>) ctType).setSuperclass(
+							factory.Type().createReference(superClass.getName()));
+				}
+			}
+
+			currentUses = captureUses(gs.getSource());
+			currentSource = gs.getSource();
+			typeImports.put(ctType, buildImports(currentUses));
+
+			// members
+			Map<String, gw.internal.gosu.parser.statements.VarStatement> fields =
+					new LinkedHashMap<>(gs.getParseInfo().getMemberFields());
+			for (gw.internal.gosu.parser.statements.VarStatement staticField
+					: gs.getParseInfo().getStaticFields().values()) {
+				fields.putIfAbsent(staticField.getIdentifierName(), staticField);
+			}
+			currentFields = new LinkedHashSet<>(fields.keySet());
+			if (enhancement && enhancedType != null) {
+				addEnhancedTypeFields(enhancedType);
+			}
+			for (gw.internal.gosu.parser.statements.VarStatement field : fields.values()) {
+				if (field.isEnumConstant()) {
+					continue;
+				}
+				ctType.addField(buildField(field));
+				if (field.getSymbol() != null) {
+					currentFieldTypes.put(
+							field.getIdentifierName(), field.getSymbol().getType());
+				}
+			}
+
+			if (ctType instanceof CtClass<?>) {
+				for (DynamicFunctionSymbol dfs : gs.getConstructorFunctions()) {
+					IFunctionStatement decl = dfs.getDeclFunctionStmt();
+					if (decl != null) {
+						@SuppressWarnings({"rawtypes", "unchecked"})
+						CtClass rawClass = (CtClass) ctType;
+						rawClass.addConstructor(buildConstructor(dfs, decl));
+					}
+				}
+			}
+
+			for (DynamicFunctionSymbol dfs : gs.getParseInfo().getMemberFunctions().values()) {
+				IFunctionStatement decl = dfs.getDeclFunctionStmt();
+				if (decl != null) {
+					ctType.addMethod(buildMethod(dfs, decl));
+				}
+			}
+
+			return ctType;
+		} finally {
+			currentClass = null;
+			currentThisType = null;
+			currentFields.clear();
+			currentFieldTypes.clear();
+			currentUses.clear();
+			currentSource = null;
+		}
 	}
 
 	private void addEnhancedTypeFields(IType enhancedType) {
