@@ -20,6 +20,7 @@ build
 mkdir -p saved_artifacts
 cp target/spoon-core-*.jar saved_artifacts
 cp spoon-javadoc/target/spoon-javadoc*.jar saved_artifacts
+cp spoon-gosu/target/spoon-gosu*.jar saved_artifacts
 
 # Build again, will overwrite target jars
 build
@@ -37,7 +38,10 @@ DEPS_EXIT="$?"
 compare_files spoon-javadoc/target/spoon-javadoc*.jar saved_artifacts/spoon-javadoc*.jar
 JAVADOC_EXIT="$?"
 
-if [[ "$CORE_EXIT" == 0 && "$DEPS_EXIT" == 0 && "$JAVADOC_EXIT" == 0 ]]; then
+compare_files spoon-gosu/target/spoon-gosu*.jar saved_artifacts/spoon-gosu*.jar
+GOSU_EXIT="$?"
+
+if [[ "$CORE_EXIT" == 0 && "$DEPS_EXIT" == 0 && "$JAVADOC_EXIT" == 0 && "$GOSU_EXIT" == 0 ]]; then
   echo -e "\033[1;32mThe jars were reproducible!\033[0m"
   exit 0
 fi
@@ -54,6 +58,9 @@ if [[ "$CORE_EXIT" != 0 ]]; then
 fi
 if [[ "$JAVADOC_EXIT" != 0 ]]; then
   echo -e "  \033[31mspoon-javadoc-VERSION.jar was not reproducible!\033[0m"
+fi
+if [[ "$GOSU_EXIT" != 0 ]]; then
+  echo -e "  \033[31mspoon-gosu-VERSION.jar was not reproducible!\033[0m"
 fi
 
 
