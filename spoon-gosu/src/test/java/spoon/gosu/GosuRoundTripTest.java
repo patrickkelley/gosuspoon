@@ -13,15 +13,19 @@ import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtThisAccess;
+import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtEnum;
+import spoon.reflect.declaration.CtEnumValue;
 import spoon.reflect.declaration.CtField;
+import spoon.reflect.declaration.CtImport;
+import spoon.reflect.declaration.CtImportKind;
+import spoon.reflect.declaration.CtInterface;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtType;
 import spoon.reflect.factory.Factory;
+import spoon.reflect.reference.CtFieldReference;
 import spoon.reflect.reference.CtPackageReference;
 import spoon.reflect.reference.CtTypeReference;
-import spoon.reflect.declaration.CtImport;
-import spoon.reflect.declaration.CtImportKind;
-import spoon.reflect.reference.CtFieldReference;
 import spoon.reflect.visitor.CtScanner;
 
 import java.io.File;
@@ -29,8 +33,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import spoon.reflect.declaration.CtElement;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -304,6 +306,37 @@ class GosuRoundTripTest {
 				+ "    return total\n"
 				+ "  }\n"
 				+ "}\n");
+		write("target/test-gsrc/demo/Named.gs",
+				"package demo\n"
+				+ "interface Named {\n"
+				+ "  function getName() : String\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/Color.gs",
+				"package demo\n"
+				+ "enum Color {\n"
+				+ "  RED,\n"
+				+ "  GREEN,\n"
+				+ "  BLUE\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/HasProps.gs",
+				"package demo\n"
+				+ "class HasProps {\n"
+				+ "  var _name : String\n"
+				+ "  property get Name() : String {\n"
+				+ "    return this._name\n"
+				+ "  }\n"
+				+ "  property set Name(n : String) {\n"
+				+ "    this._name = n\n"
+				+ "  }\n"
+				+ "  property get ReadOnly() : int {\n"
+				+ "    return 42\n"
+				+ "  }\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/Structy.gs",
+				"package demo\n"
+				+ "structure Structy {\n"
+				+ "  function compute() : int\n"
+				+ "}\n");
 
 		gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
 		factory = new Launcher().getFactory();
@@ -315,7 +348,8 @@ class GosuRoundTripTest {
 		assertThat(gosu.scanTypeNames(srcDir))
 				.containsExactlyInAnyOrder("demo.Greeter", "demo.StringExt",
 						"demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey",
-						"demo.ExtOnCtor", "demo.Funcs", "demo.Optional", "demo.Misc");
+						"demo.ExtOnCtor", "demo.Funcs", "demo.Optional", "demo.Misc",
+						"demo.Named", "demo.Color", "demo.HasProps", "demo.Structy");
 	}
 
 	@Test
@@ -593,6 +627,85 @@ class GosuRoundTripTest {
 	}
 
 	@Test
+	void interfaceAndStructureDeclarations() {
+		CtType<?> named = type("demo.Named");
+		assertThat(named).isNotNull().isInstanceOf(CtInterface.class);
+		assertThat(GosuPrettyPrinter.isGosuStructure(named)).isFalse();
+		assertThat(named.getMethods()).hasSize(1);
+		assertThat(named.getMethodsByName("getName")).hasSize(1);
+
+		String namedText = new GosuPrettyPrinter(factory.getEnvironment()).printType(named);
+		assertThat(namedText)
+				.contains("interface Named {")
+				.contains("function getName() : String");
+
+		CtType<?> structy = type("demo.Structy");
+		assertThat(structy).isNotNull().isInstanceOf(CtInterface.class);
+		assertThat(GosuPrettyPrinter.isGosuStructure(structy)).isTrue();
+		assertThat(structy.getMethods()).hasSize(1);
+		assertThat(structy.getMethodsByName("compute")).hasSize(1);
+
+		String structyText = new GosuPrettyPrinter(factory.getEnvironment()).printType(structy);
+		assertThat(structyText)
+				.contains("structure Structy {")
+				.contains("function compute() : int");
+	}
+
+	@Test
+	void enumDeclarationAndValues() {
+		CtType<?> color = type("demo.Color");
+		assertThat(color).isNotNull().isInstanceOf(CtEnum.class);
+
+		CtEnum<?> ctEnum = (CtEnum<?>) color;
+		List<String> names = ctEnum.getEnumValues().stream()
+				.map(CtEnumValue::getSimpleName)
+				.toList();
+		assertThat(names).containsExactly("RED", "GREEN", "BLUE");
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(color);
+		assertThat(text)
+				.contains("enum Color {")
+				.contains("RED,")
+				.contains("GREEN,")
+				.contains("BLUE");
+	}
+
+	@Test
+	void propertyGettersAndSetters() {
+		CtType<?> hasProps = type("demo.HasProps");
+		assertThat(hasProps).isNotNull();
+
+		List<CtMethod<?>> nameProps = hasProps.getMethodsByName("Name");
+		assertThat(nameProps).hasSize(2);
+		CtMethod<?> getter = nameProps.stream()
+				.filter(GosuPrettyPrinter::isGosuPropertyGet)
+				.findFirst()
+				.orElse(null);
+		CtMethod<?> setter = nameProps.stream()
+				.filter(GosuPrettyPrinter::isGosuPropertySet)
+				.findFirst()
+				.orElse(null);
+		assertThat(getter).isNotNull();
+		assertThat(setter).isNotNull();
+		assertThat(getter.getParameters()).isEmpty();
+		assertThat(setter.getParameters()).hasSize(1);
+
+		List<CtMethod<?>> readOnlyProps = hasProps.getMethodsByName("ReadOnly");
+		assertThat(readOnlyProps).hasSize(1);
+		assertThat(GosuPrettyPrinter.isGosuPropertyGet(readOnlyProps.get(0))).isTrue();
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(hasProps);
+		assertThat(text)
+				.contains("var _name : String")
+				.contains("property get Name() : String {")
+				.contains("return this._name")
+				.contains("property set Name(n : String) {")
+				.contains("this._name = n")
+				.contains("property get ReadOnly() : int {")
+				.contains("return 42");
+	}
+
+	@Test
 	void transformDemo() {
 		CtType<?> greeter = type("demo.Greeter");
 		CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
@@ -612,7 +725,7 @@ class GosuRoundTripTest {
 	@Test
 	void roundTripFixpointInFreshJvm() throws Exception {
 		List<CtType<?>> types = builder.buildAll(srcDir);
-		assertThat(types).hasSize(10);
+		assertThat(types).hasSize(14);
 
 		File outDir = new File("target/test-roundtrip");
 		deleteRecursively(outDir);

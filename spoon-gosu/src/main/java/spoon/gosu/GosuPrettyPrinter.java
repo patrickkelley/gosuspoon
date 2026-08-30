@@ -22,7 +22,10 @@ import spoon.reflect.declaration.CtAnnotation;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtConstructor;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtEnum;
+import spoon.reflect.declaration.CtEnumValue;
 import spoon.reflect.declaration.CtField;
+import spoon.reflect.declaration.CtInterface;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtParameter;
 import spoon.reflect.declaration.CtType;
@@ -87,6 +90,58 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	}
 
 	@Override
+	public <T> void visitCtInterface(CtInterface<T> intrface) {
+		getContext().pushCurrentThis(intrface);
+		TokenWriter w = getPrinterTokenWriter();
+		boolean structure = isGosuStructure(intrface);
+		w.writeKeyword(structure ? "structure" : "interface");
+		w.writeSpace();
+		w.writeIdentifier(stripLeadingDigits(intrface.getSimpleName()));
+
+		if (!intrface.getSuperInterfaces().isEmpty()) {
+			w.writeSeparator(" : ");
+			printCommaList(new java.util.ArrayList<>(intrface.getSuperInterfaces()));
+		}
+		w.writeSpace();
+		w.writeSeparator("{");
+		w.incTab();
+		getElementPrinterHelper().writeElementList(intrface.getTypeMembers());
+		getPrinterTokenWriter().decTab();
+		getPrinterTokenWriter().writeSeparator("}");
+		getContext().popCurrentThis();
+	}
+
+	@Override
+	public <T extends Enum<?>> void visitCtEnum(CtEnum<T> ctEnum) {
+		getContext().pushCurrentThis(ctEnum);
+		TokenWriter w = getPrinterTokenWriter();
+		w.writeKeyword("enum");
+		w.writeSpace();
+		w.writeIdentifier(stripLeadingDigits(ctEnum.getSimpleName()));
+		w.writeSpace();
+		w.writeSeparator("{");
+		w.incTab();
+		List<CtEnumValue<?>> values = ctEnum.getEnumValues();
+		for (int i = 0; i < values.size(); i++) {
+			w.writeln();
+			scan(values.get(i));
+			if (i < values.size() - 1) {
+				w.writeSeparator(",");
+			}
+		}
+		getElementPrinterHelper().writeElementList(ctEnum.getTypeMembers());
+		w.decTab();
+		w.writeln();
+		w.writeSeparator("}");
+		getContext().popCurrentThis();
+	}
+
+	@Override
+	public <T> void visitCtEnumValue(CtEnumValue<T> enumValue) {
+		getPrinterTokenWriter().writeIdentifier(enumValue.getSimpleName());
+	}
+
+	@Override
 	public <T> void visitCtField(CtField<T> field) {
 		TokenWriter w = getPrinterTokenWriter();
 		if (field.isStatic()) {
@@ -109,7 +164,19 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	@Override
 	public <T> void visitCtMethod(CtMethod<T> method) {
 		TokenWriter w = getPrinterTokenWriter();
-		w.writeKeyword("function");
+		boolean propGet = isGosuPropertyGet(method);
+		boolean propSet = isGosuPropertySet(method);
+		if (propGet) {
+			w.writeKeyword("property");
+			w.writeSpace();
+			w.writeKeyword("get");
+		} else if (propSet) {
+			w.writeKeyword("property");
+			w.writeSpace();
+			w.writeKeyword("set");
+		} else {
+			w.writeKeyword("function");
+		}
 		w.writeSpace();
 		w.writeIdentifier(stripLeadingDigits(method.getSimpleName()));
 		w.writeSeparator("(");
@@ -119,8 +186,10 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			w.writeSeparator(" : ");
 			scan(method.getType());
 		}
-		w.writeSpace();
-		scan(method.getBody());
+		if (method.getBody() != null) {
+			w.writeSpace();
+			scan(method.getBody());
+		}
 	}
 
 	@Override
@@ -305,20 +374,39 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 
 	/** True when the Ct type carries the Gosu enhancement marker annotation. */
 	public static boolean isGosuEnhancement(CtType<?> type) {
-		if (type == null) {
-			return false;
+		return GosuModelBuilder.GOSU_KIND_ENHANCEMENT.equals(getGosuKind(type));
+	}
+
+	/** True when the Ct type carries the Gosu structure marker annotation. */
+	public static boolean isGosuStructure(CtType<?> type) {
+		return GosuModelBuilder.GOSU_KIND_STRUCTURE.equals(getGosuKind(type));
+	}
+
+	/** True when the method is a Gosu property getter. */
+	public static boolean isGosuPropertyGet(CtMethod<?> method) {
+		return GosuModelBuilder.GOSU_KIND_PROPERTY_GET.equals(getGosuKind(method));
+	}
+
+	/** True when the method is a Gosu property setter. */
+	public static boolean isGosuPropertySet(CtMethod<?> method) {
+		return GosuModelBuilder.GOSU_KIND_PROPERTY_SET.equals(getGosuKind(method));
+	}
+
+	private static String getGosuKind(CtElement element) {
+		if (element == null) {
+			return null;
 		}
-		for (CtAnnotation<?> annotation : type.getAnnotations()) {
+		for (CtAnnotation<?> annotation : element.getAnnotations()) {
 			if (GosuModelBuilder.GOSU_KIND_ANNOTATION.equals(
 					annotation.getAnnotationType().getQualifiedName())) {
 				Object value = annotation.getValue("value");
 				if (value instanceof spoon.reflect.code.CtLiteral<?>) {
 					value = ((spoon.reflect.code.CtLiteral<?>) value).getValue();
 				}
-				return GosuModelBuilder.GOSU_KIND_ENHANCEMENT.equals(String.valueOf(value));
+				return String.valueOf(value);
 			}
 		}
-		return false;
+		return null;
 	}
 
 	/** The enhanced type reference of an enhancement Ct type, or null. */

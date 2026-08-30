@@ -97,8 +97,11 @@ import spoon.reflect.declaration.CtAnnotation;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtConstructor;
 import spoon.reflect.declaration.CtElement;
+import spoon.reflect.declaration.CtEnum;
+import spoon.reflect.declaration.CtEnumValue;
 import spoon.reflect.declaration.CtField;
 import spoon.reflect.declaration.CtImport;
+import spoon.reflect.declaration.CtInterface;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtModifiable;
 import spoon.reflect.declaration.CtPackage;
@@ -132,10 +135,13 @@ import java.util.regex.Pattern;
 */
 public class GosuModelBuilder {
 
-	/** Marker annotation attached to Ct types that came from a Gosu enhancement. */
+	/** Marker annotation attached to Ct types and methods for Gosu-specific constructs. */
 	public static final String GOSU_KIND_ANNOTATION = "spoon.gosu.meta.GosuKind";
 	public static final String GOSU_KIND_ENHANCEMENT = "ENHANCEMENT";
 	public static final String GOSU_KIND_CLASS = "CLASS";
+	public static final String GOSU_KIND_STRUCTURE = "STRUCTURE";
+	public static final String GOSU_KIND_PROPERTY_GET = "PROPERTY_GET";
+	public static final String GOSU_KIND_PROPERTY_SET = "PROPERTY_SET";
 
 	/**
 	* Annotation on an enhancement Ct type carrying the {@code CtTypeReference}
@@ -154,7 +160,7 @@ public class GosuModelBuilder {
 
 	private final Map<CtType<?>, List<CtImport>> typeImports = new LinkedHashMap<>();
 
-	private CtClass<?> currentClass;
+	private CtType<?> currentClass;
 	private CtTypeReference<Object> currentThisType;
 	private Set<String> currentFields = new LinkedHashSet<>();
 	private final Map<String, IType> currentFieldTypes = new LinkedHashMap<>();
@@ -218,33 +224,55 @@ public class GosuModelBuilder {
 				? ((IGosuEnhancementInternal) gosuClass).getEnhancedType()
 				: null;
 
-		CtClass<Object> ctClass = factory.createClass();
-		ctClass.setSimpleName(simpleName);
-		addGosuKind(ctClass, enhancement);
-		currentClass = ctClass;
+		CtType<?> ctType;
+		if (gs.isEnum()) {
+			@SuppressWarnings("rawtypes")
+			CtEnum ctEnum = factory.createEnum();
+			for (String constant : gs.getEnumConstants()) {
+				@SuppressWarnings("rawtypes")
+				CtEnumValue ev = factory.createEnumValue();
+				ev.setSimpleName(constant);
+				ctEnum.addEnumValue(ev);
+			}
+			ctType = ctEnum;
+		} else if (gs.isStructure()) {
+			CtInterface<Object> ctStruct = factory.createInterface();
+			addGosuKind(ctStruct, GOSU_KIND_STRUCTURE);
+			ctType = ctStruct;
+		} else if (gs.isInterface()) {
+			ctType = factory.createInterface();
+		} else {
+			CtClass<Object> ctClass = factory.createClass();
+			addGosuKind(ctClass, enhancement ? GOSU_KIND_ENHANCEMENT : GOSU_KIND_CLASS);
+			ctType = ctClass;
+		}
+
+		ctType.setSimpleName(simpleName);
+		currentClass = ctType;
 		currentThisType = null;
 
 		if (pkgName != null) {
 			CtPackage pkg = factory.Package().getOrCreate(pkgName);
-			pkg.addType(ctClass);
+			pkg.addType(ctType);
 		}
 
 		if (enhancement) {
 			if (enhancedType != null) {
 				CtTypeReference<Object> enhancedRef = mapType(enhancedType);
-				addEnhancedType(ctClass, enhancedRef);
+				addEnhancedType(ctType, enhancedRef);
 				currentThisType = enhancedRef;
 			}
-		} else {
+		} else if (ctType instanceof CtClass<?>) {
 			IGosuClassInternal superClass = gs.getSuperClass();
 			if (superClass != null && !"java.lang.Object".equals(superClass.getName())) {
-				ctClass.setSuperclass(factory.Type().createReference(superClass.getName()));
+				((CtClass<?>) ctType).setSuperclass(
+						factory.Type().createReference(superClass.getName()));
 			}
 		}
 
 		currentUses = captureUses(gs.getSource());
 		currentSource = gs.getSource();
-		typeImports.put(ctClass, buildImports(currentUses));
+		typeImports.put(ctType, buildImports(currentUses));
 
 		// members
 		Map<String, gw.internal.gosu.parser.statements.VarStatement> fields =
@@ -261,24 +289,28 @@ public class GosuModelBuilder {
 			if (field.isEnumConstant()) {
 				continue;
 			}
-			ctClass.addField(buildField(field));
+			ctType.addField(buildField(field));
 			if (field.getSymbol() != null) {
 				currentFieldTypes.put(
 						field.getIdentifierName(), field.getSymbol().getType());
 			}
 		}
 
-		for (DynamicFunctionSymbol dfs : gs.getConstructorFunctions()) {
-			IFunctionStatement decl = dfs.getDeclFunctionStmt();
-			if (decl != null) {
-				ctClass.addConstructor(buildConstructor(dfs, decl));
+		if (ctType instanceof CtClass<?>) {
+			for (DynamicFunctionSymbol dfs : gs.getConstructorFunctions()) {
+				IFunctionStatement decl = dfs.getDeclFunctionStmt();
+				if (decl != null) {
+					@SuppressWarnings({"rawtypes", "unchecked"})
+					CtClass rawClass = (CtClass) ctType;
+					rawClass.addConstructor(buildConstructor(dfs, decl));
+				}
 			}
 		}
 
 		for (DynamicFunctionSymbol dfs : gs.getParseInfo().getMemberFunctions().values()) {
 			IFunctionStatement decl = dfs.getDeclFunctionStmt();
 			if (decl != null) {
-				ctClass.addMethod(buildMethod(dfs, decl));
+				ctType.addMethod(buildMethod(dfs, decl));
 			}
 		}
 
@@ -286,7 +318,7 @@ public class GosuModelBuilder {
 		currentThisType = null;
 		currentFields = new LinkedHashSet<>();
 		currentUses = new ArrayList<>();
-		return ctClass;
+		return ctType;
 	}
 
 	private void addEnhancedTypeFields(IType enhancedType) {
@@ -313,7 +345,7 @@ public class GosuModelBuilder {
 		}
 	}
 
-	private void addEnhancedType(CtClass<?> ctType, CtTypeReference<Object> enhancedType) {
+	private void addEnhancedType(CtType<?> ctType, CtTypeReference<Object> enhancedType) {
 		CtTypeReference<Annotation> ref =
 				factory.Type().createReference(GOSU_ENHANCED_TYPE_ANNOTATION);
 		CtAnnotation<Annotation> marker = factory.createAnnotation(ref);
@@ -321,12 +353,12 @@ public class GosuModelBuilder {
 		ctType.addAnnotation(marker);
 	}
 
-	private void addGosuKind(CtClass<?> ctType, boolean enhancement) {
+	private void addGosuKind(CtElement element, String kind) {
 		CtTypeReference<Annotation> ref =
 				factory.Type().createReference(GOSU_KIND_ANNOTATION);
 		CtAnnotation<Annotation> marker = factory.createAnnotation(ref);
-		marker.addValue("value", enhancement ? GOSU_KIND_ENHANCEMENT : GOSU_KIND_CLASS);
-		ctType.addAnnotation(marker);
+		marker.addValue("value", kind);
+		element.addAnnotation(marker);
 	}
 
 	private List<CtImport> buildImports(List<String> uses) {
@@ -384,12 +416,24 @@ public class GosuModelBuilder {
 
 	private CtMethod<?> buildMethod(DynamicFunctionSymbol dfs, IFunctionStatement decl) {
 		CtMethod<Object> method = factory.createMethod();
-		method.setSimpleName(dfs.getDisplayName());
+		String name = dfs.getDisplayName();
+		boolean prop = name.startsWith("@");
+		if (prop) {
+			name = name.substring(1);
+			boolean isSetter = dfs.getReturnType() == null
+					|| "void".equals(dfs.getReturnType().getName());
+			addGosuKind(method, isSetter ? GOSU_KIND_PROPERTY_SET : GOSU_KIND_PROPERTY_GET);
+		}
+		method.setSimpleName(name);
 		method.setType(mapType(dfs.getReturnType()));
 		for (IParameterDeclaration p : decl.getParameters()) {
 			method.addParameter(buildParameter(p));
 		}
-		method.setBody(buildBody(decl));
+		CtBlock<?> body = buildBody(decl);
+		if (body != null && (!body.getStatements().isEmpty()
+				|| (decl.getGosuClass() != null && !decl.getGosuClass().isInterface()))) {
+			method.setBody(body);
+		}
 		return method;
 	}
 
