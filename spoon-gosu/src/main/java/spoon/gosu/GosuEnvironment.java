@@ -44,14 +44,11 @@ public final class GosuEnvironment implements AutoCloseable {
 	}
 
 	/**
-	* Bootstraps Gosu against the given source directories, or returns the
-	* already-initialized environment if the JVM has one.
-	*/
+	 * Bootstraps Gosu against the given source directories, or reinitializes the
+	 * runtime if the JVM already has an initialized environment.
+	 */
 	public static GosuEnvironment initialize(Collection<File> sourceDirs) {
 		synchronized (LOCK) {
-			if (instance != null) {
-				return instance;
-			}
 			IExecutionEnvironment env = gw.internal.gosu.parser.ExecutionEnvironment.instance();
 			List<IDirectory> sources = new ArrayList<>();
 			gw.config.CommonServices.getFileSystem();
@@ -63,7 +60,11 @@ public final class GosuEnvironment implements AutoCloseable {
 			List<gw.lang.init.GosuPathEntry> entries = new ArrayList<>();
 			entries.add(new gw.lang.init.GosuPathEntry(cwd, sources));
 			GosuInitialization init = GosuInitialization.instance(env);
-			init.initializeRuntime(entries);
+			if (instance != null || init.isInitialized()) {
+				init.reinitializeRuntime(entries, new String[0]);
+			} else {
+				init.initializeRuntime(entries);
+			}
 			initialized = init.isInitialized();
 			if (!initialized) {
 				throw new IllegalStateException("Gosu runtime failed to initialize");

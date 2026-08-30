@@ -643,6 +643,40 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		return GosuModelBuilder.GOSU_KIND_PROPERTY_SET.equals(getGosuKind(method));
 	}
 
+	/** Tags a Ct class as a Gosu enhancement on the given target type. */
+	public static void tagEnhancement(CtClass<?> type, String enhancedType) {
+		tagGosuKind(type, GosuModelBuilder.GOSU_KIND_ENHANCEMENT);
+		CtTypeReference<Annotation> ref =
+				type.getFactory().Type().createReference(GosuModelBuilder.GOSU_ENHANCED_TYPE_ANNOTATION);
+		CtAnnotation<Annotation> marker = type.getFactory().createAnnotation(ref);
+		marker.addValue("value", enhancedType);
+		type.addAnnotation(marker);
+	}
+
+	/** Tags a Ct interface as a Gosu structure. */
+	public static void tagStructure(CtInterface<?> type) {
+		tagGosuKind(type, GosuModelBuilder.GOSU_KIND_STRUCTURE);
+	}
+
+	/** Tags a Ct method as a Gosu property getter. */
+	public static void tagPropertyGet(CtMethod<?> method) {
+		tagGosuKind(method, GosuModelBuilder.GOSU_KIND_PROPERTY_GET);
+	}
+
+	/** Tags a Ct method as a Gosu property setter. */
+	public static void tagPropertySet(CtMethod<?> method) {
+		tagGosuKind(method, GosuModelBuilder.GOSU_KIND_PROPERTY_SET);
+	}
+
+	/** Tags an arbitrary Ct element with a GosuKind marker annotation. */
+	public static void tagGosuKind(CtElement element, String kind) {
+		CtTypeReference<Annotation> ref =
+				element.getFactory().Type().createReference(GosuModelBuilder.GOSU_KIND_ANNOTATION);
+		CtAnnotation<Annotation> marker = element.getFactory().createAnnotation(ref);
+		marker.addValue("value", kind);
+		element.addAnnotation(marker);
+	}
+
 	private static String getGosuKind(CtElement element) {
 		if (element == null) {
 			return null;
