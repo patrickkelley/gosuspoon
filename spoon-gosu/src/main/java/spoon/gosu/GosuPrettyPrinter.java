@@ -19,6 +19,7 @@ import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtNewArray;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.declaration.CtAnnotation;
+import spoon.reflect.declaration.CtAnnotationType;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtConstructor;
 import spoon.reflect.declaration.CtElement;
@@ -34,7 +35,9 @@ import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.visitor.DefaultJavaPrettyPrinter;
 import spoon.reflect.visitor.TokenWriter;
 
+import java.lang.annotation.Annotation;
 import java.util.List;
+import java.util.Map;
 
 /**
 * A Spoon pretty-printer that emits Gosu instead of Java: types are
@@ -65,6 +68,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	public <T> void visitCtClass(CtClass<T> type) {
 		getContext().pushCurrentThis(type);
 		if (!type.isImplicit()) {
+			printAnnotations(type, true);
 			TokenWriter w = getPrinterTokenWriter();
 			boolean enhancement = isGosuEnhancement(type);
 			w.writeKeyword(enhancement ? "enhancement" : "class");
@@ -96,6 +100,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	@Override
 	public <T> void visitCtInterface(CtInterface<T> intrface) {
 		getContext().pushCurrentThis(intrface);
+		printAnnotations(intrface, true);
 		TokenWriter w = getPrinterTokenWriter();
 		boolean structure = isGosuStructure(intrface);
 		w.writeKeyword(structure ? "structure" : "interface");
@@ -121,6 +126,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	@Override
 	public <T extends Enum<?>> void visitCtEnum(CtEnum<T> ctEnum) {
 		getContext().pushCurrentThis(ctEnum);
+		printAnnotations(ctEnum, true);
 		TokenWriter w = getPrinterTokenWriter();
 		w.writeKeyword("enum");
 		w.writeSpace();
@@ -149,7 +155,25 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	}
 
 	@Override
+	public <A extends Annotation> void visitCtAnnotationType(CtAnnotationType<A> annotationType) {
+		getContext().pushCurrentThis(annotationType);
+		TokenWriter w = getPrinterTokenWriter();
+		printAnnotations(annotationType, true);
+		w.writeKeyword("annotation");
+		w.writeSpace();
+		w.writeIdentifier(stripLeadingDigits(annotationType.getSimpleName()));
+		w.writeSpace();
+		w.writeSeparator("{");
+		w.incTab();
+		getElementPrinterHelper().writeElementList(annotationType.getTypeMembers());
+		w.decTab();
+		w.writeSeparator("}");
+		getContext().popCurrentThis();
+	}
+
+	@Override
 	public <T> void visitCtField(CtField<T> field) {
+		printAnnotations(field, true);
 		TokenWriter w = getPrinterTokenWriter();
 		if (field.isStatic()) {
 			w.writeKeyword("static");
@@ -170,6 +194,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 
 	@Override
 	public <T> void visitCtMethod(CtMethod<T> method) {
+		printAnnotations(method, true);
 		TokenWriter w = getPrinterTokenWriter();
 		boolean propGet = isGosuPropertyGet(method);
 		boolean propSet = isGosuPropertySet(method);
@@ -204,6 +229,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 
 	@Override
 	public <T> void visitCtConstructor(CtConstructor<T> constructor) {
+		printAnnotations(constructor, true);
 		TokenWriter w = getPrinterTokenWriter();
 		w.writeKeyword("construct");
 		w.writeSeparator("(");
@@ -215,6 +241,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 
 	@Override
 	public <T> void visitCtParameter(CtParameter<T> parameter) {
+		printAnnotations(parameter, false);
 		getPrinterTokenWriter().writeIdentifier(parameter.getSimpleName());
 		getPrinterTokenWriter().writeSeparator(" : ");
 		scan(parameter.getType());
@@ -395,6 +422,68 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			}
 		}
 		w.writeSeparator(">");
+	}
+
+	@Override
+	public <A extends Annotation> void visitCtAnnotation(CtAnnotation<A> annotation) {
+		if (isInternalMarker(annotation)) {
+			return;
+		}
+		TokenWriter w = getPrinterTokenWriter();
+		w.writeSeparator("@");
+		scan(annotation.getAnnotationType());
+		if (!annotation.getValues().isEmpty()) {
+			w.writeSeparator("(");
+			if (annotation.getValues().size() == 1 && annotation.getValues().containsKey("value")) {
+				scan(annotation.getValues().get("value"));
+			} else {
+				int i = 0;
+				for (Map.Entry<String, ?> entry : annotation.getValues().entrySet()) {
+					spoon.reflect.code.CtExpression<?> val =
+							(spoon.reflect.code.CtExpression<?>) entry.getValue();
+					if (entry.getKey().startsWith("param")) {
+						scan(val);
+					} else {
+						w.writeIdentifier(entry.getKey());
+						w.writeSpace();
+						w.writeOperator("=");
+						w.writeSpace();
+						scan(val);
+					}
+					if (i < annotation.getValues().size() - 1) {
+						w.writeSeparator(", ");
+					}
+					i++;
+				}
+			}
+			w.writeSeparator(")");
+		}
+	}
+
+	private void printAnnotations(CtElement element, boolean newline) {
+		if (element == null || element.getAnnotations().isEmpty()) {
+			return;
+		}
+		TokenWriter w = getPrinterTokenWriter();
+		for (CtAnnotation<?> anno : element.getAnnotations()) {
+			if (!isInternalMarker(anno)) {
+				scan(anno);
+				if (newline) {
+					w.writeln();
+				} else {
+					w.writeSpace();
+				}
+			}
+		}
+	}
+
+	private static boolean isInternalMarker(CtAnnotation<?> annotation) {
+		if (annotation == null || annotation.getAnnotationType() == null) {
+			return false;
+		}
+		String name = annotation.getAnnotationType().getQualifiedName();
+		return GosuModelBuilder.GOSU_KIND_ANNOTATION.equals(name)
+				|| GosuModelBuilder.GOSU_ENHANCED_TYPE_ANNOTATION.equals(name);
 	}
 
 	private void printCommaList(List<? extends CtElement> elements) {

@@ -62,7 +62,11 @@ import gw.lang.parser.statements.IStatementList;
 import gw.lang.parser.statements.ISwitchStatement;
 import gw.lang.parser.statements.IThrowStatement;
 import gw.lang.parser.statements.ITryCatchFinallyStatement;
+import gw.internal.gosu.parser.IGosuAnnotation;
+import gw.internal.gosu.parser.expressions.AnnotationExpression;
+import gw.internal.gosu.parser.expressions.ParameterDeclaration;
 import gw.lang.parser.statements.IUsingStatement;
+import gw.lang.reflect.IModifierInfo;
 import gw.lang.parser.statements.IWhileStatement;
 import gw.lang.reflect.IType;
 import gw.lang.reflect.IPropertyInfo;
@@ -97,6 +101,7 @@ import spoon.reflect.code.CtVariableAccess;
 import spoon.reflect.code.CtWhile;
 import spoon.reflect.code.UnaryOperatorKind;
 import spoon.reflect.declaration.CtAnnotation;
+import spoon.reflect.declaration.CtAnnotationType;
 import spoon.reflect.declaration.CtClass;
 import spoon.reflect.declaration.CtConstructor;
 import spoon.reflect.declaration.CtElement;
@@ -240,6 +245,10 @@ public class GosuModelBuilder {
 				ctEnum.addEnumValue(ev);
 			}
 			ctType = ctEnum;
+		} else if (gs.isAnnotation()) {
+			@SuppressWarnings("rawtypes")
+			CtAnnotationType ctAnno = factory.createAnnotationType();
+			ctType = ctAnno;
 		} else if (gs.isStructure()) {
 			CtInterface<Object> ctStruct = factory.createInterface();
 			addGosuKind(ctStruct, GOSU_KIND_STRUCTURE);
@@ -257,6 +266,9 @@ public class GosuModelBuilder {
 			for (IGenericTypeVariable gtv : gs.getGenericTypeVariables()) {
 				ctType.addFormalCtTypeParameter(buildTypeParameter(gtv));
 			}
+		}
+		if (gs.getModifierInfo() != null) {
+			addAnnotations(gs.getModifierInfo(), ctType);
 		}
 		currentClass = ctType;
 		currentThisType = null;
@@ -408,6 +420,9 @@ public class GosuModelBuilder {
 		field.setSimpleName(var.getIdentifierName());
 		field.setType(mapType(var.getType()));
 		copyModifiers(var, field);
+		if (var.getModifierInfo() != null) {
+			addAnnotations(var.getModifierInfo(), field);
+		}
 		if (var.getAsExpression() != null) {
 			field.setDefaultExpression(mapExpression(var.getAsExpression(), field));
 		}
@@ -417,6 +432,9 @@ public class GosuModelBuilder {
 	private CtConstructor<Object> buildConstructor(DynamicFunctionSymbol dfs,
 											IFunctionStatement decl) {
 		CtConstructor<Object> ctor = factory.createConstructor();
+		if (dfs.getModifierInfo() != null) {
+			addAnnotations(dfs.getModifierInfo(), ctor);
+		}
 		for (IParameterDeclaration p : decl.getParameters()) {
 			ctor.addParameter(buildParameter(p));
 		}
@@ -444,6 +462,9 @@ public class GosuModelBuilder {
 				}
 			}
 		}
+		if (dfs.getModifierInfo() != null) {
+			addAnnotations(dfs.getModifierInfo(), method);
+		}
 		method.setSimpleName(name);
 		method.setType(mapType(dfs.getReturnType()));
 		for (IParameterDeclaration p : decl.getParameters()) {
@@ -455,6 +476,37 @@ public class GosuModelBuilder {
 			method.setBody(body);
 		}
 		return method;
+	}
+
+	private void addAnnotations(IModifierInfo mi, CtElement element) {
+		if (mi == null || mi.getAnnotations() == null) {
+			return;
+		}
+		for (Object obj : mi.getAnnotations()) {
+			if (obj instanceof IGosuAnnotation) {
+				element.addAnnotation(buildAnnotation((IGosuAnnotation) obj, element));
+			}
+		}
+	}
+
+	private CtAnnotation<Annotation> buildAnnotation(IGosuAnnotation ga, CtElement context) {
+		CtTypeReference<Annotation> annoType = mapType(ga.getType());
+		CtAnnotation<Annotation> ctAnno = factory.createAnnotation(annoType);
+		gw.lang.parser.IExpression expr = ga.getExpression();
+		if (expr instanceof AnnotationExpression) {
+			AnnotationExpression ae = (AnnotationExpression) expr;
+			gw.lang.parser.IExpression[] args = ae.getArgs();
+			if (args != null && args.length > 0) {
+				if (args.length == 1) {
+					ctAnno.addValue("value", mapExpression(args[0], ctAnno));
+				} else {
+					for (int i = 0; i < args.length; i++) {
+						ctAnno.addValue("param" + i, mapExpression(args[i], ctAnno));
+					}
+				}
+			}
+		}
+		return ctAnno;
 	}
 
 	private CtTypeParameter buildTypeParameter(IGenericTypeVariable gtv) {
@@ -480,6 +532,16 @@ public class GosuModelBuilder {
 		CtParameter<Object> param = factory.createParameter();
 		param.setSimpleName(p.getLocalVarName().toString());
 		param.setType(mapType(p.getType()));
+		if (p instanceof ParameterDeclaration) {
+			List<?> annos = ((ParameterDeclaration) p).getAnnotations();
+			if (annos != null) {
+				for (Object obj : annos) {
+					if (obj instanceof IGosuAnnotation) {
+						param.addAnnotation(buildAnnotation((IGosuAnnotation) obj, param));
+					}
+				}
+			}
+		}
 		return param;
 	}
 
@@ -898,6 +960,18 @@ public class GosuModelBuilder {
 	}
 
 	private CtExpression<Object> construct(INewExpression nw, CtElement context) {
+		if (nw instanceof gw.internal.gosu.parser.expressions.InferredNewExpression) {
+			gw.internal.gosu.parser.expressions.InferredNewExpression inf =
+					(gw.internal.gosu.parser.expressions.InferredNewExpression) nw;
+			if (inf.getValueExpressions() != null) {
+				CtNewArray<Object> arr = factory.createNewArray();
+				arr.setType(mapType(nw.getType()));
+				for (gw.lang.parser.IExpression item : inf.getValueExpressions()) {
+					arr.addElement(cast(mapExpression(item, arr)));
+				}
+				return arr;
+			}
+		}
 		if (nw.getInitializer() instanceof ICollectionInitializerExpression) {
 			ICollectionInitializerExpression ini =
 					(ICollectionInitializerExpression) nw.getInitializer();

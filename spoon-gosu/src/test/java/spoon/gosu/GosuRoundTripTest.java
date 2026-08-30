@@ -13,6 +13,8 @@ import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtThisAccess;
+import spoon.reflect.declaration.CtAnnotation;
+import spoon.reflect.declaration.CtAnnotationType;
 import spoon.reflect.declaration.CtElement;
 import spoon.reflect.declaration.CtEnum;
 import spoon.reflect.declaration.CtEnumValue;
@@ -375,6 +377,26 @@ class GosuRoundTripTest {
 				+ "  function first() : A\n"
 				+ "  function second() : B\n"
 				+ "}\n");
+		write("target/test-gsrc/demo/Tag.gs",
+				"package demo\n"
+				+ "annotation Tag {\n"
+				+ "  var _name : String as Name\n"
+				+ "  construct() {}\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/AnnoDemo.gs",
+				"package demo\n"
+				+ "uses java.lang.Deprecated\n"
+				+ "uses java.lang.SuppressWarnings\n"
+				+ "@Deprecated\n"
+				+ "@SuppressWarnings({ \"rawtypes\", \"unchecked\" })\n"
+				+ "class AnnoDemo {\n"
+				+ "  @Deprecated\n"
+				+ "  var _field : int\n"
+				+ "  @Deprecated\n"
+				+ "  function foo(@Deprecated p : String) : String {\n"
+				+ "    return p\n"
+				+ "  }\n"
+				+ "}\n");
 
 		gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
 		factory = new Launcher().getFactory();
@@ -388,7 +410,8 @@ class GosuRoundTripTest {
 						"demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey",
 						"demo.ExtOnCtor", "demo.Funcs", "demo.Optional", "demo.Misc",
 						"demo.Named", "demo.Color", "demo.HasProps", "demo.Structy",
-						"demo.Box", "demo.MultiBound", "demo.Container", "demo.Pair");
+						"demo.Box", "demo.MultiBound", "demo.Container", "demo.Pair",
+						"demo.Tag", "demo.AnnoDemo");
 	}
 
 	@Test
@@ -814,6 +837,49 @@ class GosuRoundTripTest {
 	}
 
 	@Test
+	void annotationUsagesOnClassFieldMethodParameter() {
+		CtType<?> demo = type("demo.AnnoDemo");
+		assertThat(demo).isNotNull();
+		List<String> typeAnnos = demo.getAnnotations().stream()
+				.map(a -> a.getAnnotationType().getSimpleName())
+				.filter(name -> !name.equals("GosuKind"))
+				.toList();
+		assertThat(typeAnnos).containsExactlyInAnyOrder("Deprecated", "SuppressWarnings");
+
+		CtField<?> field = demo.getField("_field");
+		assertThat(field).isNotNull();
+		assertThat(field.getAnnotations()).hasSize(1);
+		assertThat(field.getAnnotations().get(0).getAnnotationType().getSimpleName()).isEqualTo("Deprecated");
+
+		CtMethod<?> foo = demo.getMethodsByName("foo").get(0);
+		assertThat(foo.getAnnotations()).hasSize(1);
+		assertThat(foo.getAnnotations().get(0).getAnnotationType().getSimpleName()).isEqualTo("Deprecated");
+
+		assertThat(foo.getParameters()).hasSize(1);
+		assertThat(foo.getParameters().get(0).getAnnotations()).hasSize(1);
+		assertThat(foo.getParameters().get(0).getAnnotations().get(0).getAnnotationType().getSimpleName()).isEqualTo("Deprecated");
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(demo);
+		assertThat(text)
+				.contains("@Deprecated")
+				.contains("@SuppressWarnings({ \"rawtypes\", \"unchecked\" })")
+				.contains("class AnnoDemo {")
+				.contains("@Deprecated\n    var _field : int")
+				.contains("@Deprecated\n    function foo(@Deprecated p : String) : String");
+	}
+
+	@Test
+	void customAnnotationDeclaration() {
+		CtType<?> tag = type("demo.Tag");
+		assertThat(tag).isNotNull().isInstanceOf(CtAnnotationType.class);
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(tag);
+		assertThat(text)
+				.contains("annotation Tag {")
+				.contains("var _name : String");
+	}
+
+	@Test
 	void transformDemo() {
 		CtType<?> greeter = type("demo.Greeter");
 		CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
@@ -833,7 +899,7 @@ class GosuRoundTripTest {
 	@Test
 	void roundTripFixpointInFreshJvm() throws Exception {
 		List<CtType<?>> types = builder.buildAll(srcDir);
-		assertThat(types).hasSize(18);
+		assertThat(types).hasSize(20);
 
 		File outDir = new File("target/test-roundtrip");
 		deleteRecursively(outDir);
