@@ -67,6 +67,9 @@ import gw.lang.parser.statements.IWhileStatement;
 import gw.lang.reflect.IType;
 import gw.lang.reflect.IPropertyInfo;
 import gw.lang.reflect.gs.ICompilableType;
+import gw.lang.reflect.gs.IGenericTypeVariable;
+import gw.lang.reflect.gs.IGosuClass;
+import gw.lang.reflect.gs.IGosuMethodInfo;
 import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtAssert;
@@ -107,10 +110,12 @@ import spoon.reflect.declaration.CtModifiable;
 import spoon.reflect.declaration.CtPackage;
 import spoon.reflect.declaration.CtParameter;
 import spoon.reflect.declaration.CtType;
+import spoon.reflect.declaration.CtTypeParameter;
 import spoon.reflect.declaration.ModifierKind;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtExecutableReference;
 import spoon.reflect.reference.CtFieldReference;
+import spoon.reflect.reference.CtIntersectionTypeReference;
 import spoon.reflect.reference.CtPackageReference;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.reference.CtVariableReference;
@@ -190,10 +195,10 @@ public class GosuModelBuilder {
 		List<CtType<?>> result = new ArrayList<>();
 		for (String name : gosu.scanTypeNames(sourceDir)) {
 			ICompilableType ct = gosu.loadType(name);
-			if (!(ct instanceof gw.lang.reflect.gs.IGosuClass)) {
+			if (!(ct instanceof IGosuClass)) {
 				continue;
 			}
-			CtType<?> built = buildType((gw.lang.reflect.gs.IGosuClass) ct);
+			CtType<?> built = buildType((IGosuClass) ct);
 			if (built != null) {
 				result.add(built);
 			}
@@ -202,7 +207,7 @@ public class GosuModelBuilder {
 	}
 
 	/** Builds a Ct type for a single already-loaded Gosu class/enhancement. */
-	public CtType<?> buildType(gw.lang.reflect.gs.IGosuClass gosuClass) {
+	public CtType<?> buildType(IGosuClass gosuClass) {
 		if (!(gosuClass instanceof IGosuClassInternal)) {
 			return null;
 		}
@@ -248,6 +253,11 @@ public class GosuModelBuilder {
 		}
 
 		ctType.setSimpleName(simpleName);
+		if (gs.getGenericTypeVariables() != null) {
+			for (IGenericTypeVariable gtv : gs.getGenericTypeVariables()) {
+				ctType.addFormalCtTypeParameter(buildTypeParameter(gtv));
+			}
+		}
 		currentClass = ctType;
 		currentThisType = null;
 
@@ -423,6 +433,16 @@ public class GosuModelBuilder {
 			boolean isSetter = dfs.getReturnType() == null
 					|| "void".equals(dfs.getReturnType().getName());
 			addGosuKind(method, isSetter ? GOSU_KIND_PROPERTY_SET : GOSU_KIND_PROPERTY_GET);
+		} else if (dfs.hasTypeVariables()) {
+			Object mi = dfs.getMethodOrConstructorInfo();
+			if (mi instanceof IGosuMethodInfo) {
+				IGenericTypeVariable[] tvs = ((IGosuMethodInfo) mi).getTypeVariables();
+				if (tvs != null) {
+					for (IGenericTypeVariable gtv : tvs) {
+						method.addFormalCtTypeParameter(buildTypeParameter(gtv));
+					}
+				}
+			}
 		}
 		method.setSimpleName(name);
 		method.setType(mapType(dfs.getReturnType()));
@@ -435,6 +455,25 @@ public class GosuModelBuilder {
 			method.setBody(body);
 		}
 		return method;
+	}
+
+	private CtTypeParameter buildTypeParameter(IGenericTypeVariable gtv) {
+		CtTypeParameter tp = factory.createTypeParameter();
+		tp.setSimpleName(gtv.getName());
+		IType bound = gtv.getBoundingType();
+		if (bound != null && !"java.lang.Object".equals(bound.getName())) {
+			if (bound.isCompoundType()) {
+				@SuppressWarnings("rawtypes")
+				CtIntersectionTypeReference inter = factory.createIntersectionTypeReference();
+				for (IType comp : bound.getCompoundTypeComponents()) {
+					inter.addBound(mapType(comp));
+				}
+				tp.setSuperclass(inter);
+			} else {
+				tp.setSuperclass(mapType(bound));
+			}
+		}
+		return tp;
 	}
 
 	private CtParameter<?> buildParameter(IParameterDeclaration p) {

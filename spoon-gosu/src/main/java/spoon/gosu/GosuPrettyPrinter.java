@@ -29,6 +29,7 @@ import spoon.reflect.declaration.CtInterface;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtParameter;
 import spoon.reflect.declaration.CtType;
+import spoon.reflect.declaration.CtTypeParameter;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.visitor.DefaultJavaPrettyPrinter;
 import spoon.reflect.visitor.TokenWriter;
@@ -69,6 +70,9 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			w.writeKeyword(enhancement ? "enhancement" : "class");
 			w.writeSpace();
 			w.writeIdentifier(stripLeadingDigits(type.getSimpleName()));
+			if (!type.getFormalCtTypeParameters().isEmpty()) {
+				printFormalTypeParameters(type.getFormalCtTypeParameters());
+			}
 
 			CtTypeReference<?> superclass = enhancement
 					? enhancedTypeOf(type)
@@ -97,6 +101,9 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeKeyword(structure ? "structure" : "interface");
 		w.writeSpace();
 		w.writeIdentifier(stripLeadingDigits(intrface.getSimpleName()));
+		if (!intrface.getFormalCtTypeParameters().isEmpty()) {
+			printFormalTypeParameters(intrface.getFormalCtTypeParameters());
+		}
 
 		if (!intrface.getSuperInterfaces().isEmpty()) {
 			w.writeSeparator(" : ");
@@ -179,6 +186,9 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		}
 		w.writeSpace();
 		w.writeIdentifier(stripLeadingDigits(method.getSimpleName()));
+		if (!method.getFormalCtTypeParameters().isEmpty()) {
+			printFormalTypeParameters(method.getFormalCtTypeParameters());
+		}
 		w.writeSeparator("(");
 		printCommaList(method.getParameters());
 		w.writeSeparator(")");
@@ -360,6 +370,31 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			scan(statement);
 		}
 		w.decTab();
+	}
+
+	@Override
+	public void visitCtTypeParameter(CtTypeParameter typeParameter) {
+		TokenWriter w = getPrinterTokenWriter();
+		w.writeIdentifier(typeParameter.getSimpleName());
+		CtTypeReference<?> superclass = typeParameter.getSuperclass();
+		if (superclass != null && !"java.lang.Object".equals(superclass.getQualifiedName())) {
+			w.writeSpace();
+			w.writeKeyword("extends");
+			w.writeSpace();
+			scan(superclass);
+		}
+	}
+
+	private void printFormalTypeParameters(List<CtTypeParameter> typeParameters) {
+		TokenWriter w = getPrinterTokenWriter();
+		w.writeSeparator("<");
+		for (int i = 0; i < typeParameters.size(); i++) {
+			scan(typeParameters.get(i));
+			if (i < typeParameters.size() - 1) {
+				w.writeSeparator(", ");
+			}
+		}
+		w.writeSeparator(">");
 	}
 
 	private void printCommaList(List<? extends CtElement> elements) {

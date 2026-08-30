@@ -22,6 +22,7 @@ import spoon.reflect.declaration.CtImportKind;
 import spoon.reflect.declaration.CtInterface;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtType;
+import spoon.reflect.declaration.CtTypeParameter;
 import spoon.reflect.factory.Factory;
 import spoon.reflect.reference.CtFieldReference;
 import spoon.reflect.reference.CtPackageReference;
@@ -337,6 +338,43 @@ class GosuRoundTripTest {
 				+ "structure Structy {\n"
 				+ "  function compute() : int\n"
 				+ "}\n");
+		write("target/test-gsrc/demo/Box.gs",
+				"package demo\n"
+				+ "uses java.lang.CharSequence\n"
+				+ "class Box<T extends CharSequence> {\n"
+				+ "  var _item : T\n"
+				+ "  construct(item : T) {\n"
+				+ "    _item = item\n"
+				+ "  }\n"
+				+ "  function get() : T {\n"
+				+ "    return _item\n"
+				+ "  }\n"
+				+ "  function wrap<E>(e : E) : Box<String> {\n"
+				+ "    return null\n"
+				+ "  }\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/MultiBound.gs",
+				"package demo\n"
+				+ "uses java.lang.CharSequence\n"
+				+ "uses java.io.Serializable\n"
+				+ "class MultiBound<T extends CharSequence & Serializable> {\n"
+				+ "  var _val : T\n"
+				+ "  function combine<K, V>(k : K, v : V) : String {\n"
+				+ "    return null\n"
+				+ "  }\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/Container.gs",
+				"package demo\n"
+				+ "interface Container<E> {\n"
+				+ "  function add(elem : E)\n"
+				+ "  function get(idx : int) : E\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/Pair.gs",
+				"package demo\n"
+				+ "structure Pair<A, B> {\n"
+				+ "  function first() : A\n"
+				+ "  function second() : B\n"
+				+ "}\n");
 
 		gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
 		factory = new Launcher().getFactory();
@@ -349,7 +387,8 @@ class GosuRoundTripTest {
 				.containsExactlyInAnyOrder("demo.Greeter", "demo.StringExt",
 						"demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey",
 						"demo.ExtOnCtor", "demo.Funcs", "demo.Optional", "demo.Misc",
-						"demo.Named", "demo.Color", "demo.HasProps", "demo.Structy");
+						"demo.Named", "demo.Color", "demo.HasProps", "demo.Structy",
+						"demo.Box", "demo.MultiBound", "demo.Container", "demo.Pair");
 	}
 
 	@Test
@@ -706,6 +745,75 @@ class GosuRoundTripTest {
 	}
 
 	@Test
+	void genericClassAndMethodTypeParameters() {
+		CtType<?> box = type("demo.Box");
+		assertThat(box).isNotNull();
+		assertThat(box.getFormalCtTypeParameters()).hasSize(1);
+		CtTypeParameter tp = box.getFormalCtTypeParameters().get(0);
+		assertThat(tp.getSimpleName()).isEqualTo("T");
+		assertThat(tp.getSuperclass().getSimpleName()).isEqualTo("CharSequence");
+
+		CtMethod<?> wrap = box.getMethodsByName("wrap").get(0);
+		assertThat(wrap.getFormalCtTypeParameters()).hasSize(1);
+		assertThat(wrap.getFormalCtTypeParameters().get(0).getSimpleName()).isEqualTo("E");
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(box);
+		assertThat(text)
+				.contains("class Box<T extends CharSequence> {")
+				.contains("var _item : T")
+				.contains("construct(item : T) {")
+				.contains("function get() : T {")
+				.contains("function wrap<E>(e : E) : demo.Box<String> {");
+	}
+
+	@Test
+	void genericMultiBoundTypeParameters() {
+		CtType<?> multi = type("demo.MultiBound");
+		assertThat(multi).isNotNull();
+		assertThat(multi.getFormalCtTypeParameters()).hasSize(1);
+		CtTypeParameter tp = multi.getFormalCtTypeParameters().get(0);
+		assertThat(tp.getSimpleName()).isEqualTo("T");
+		assertThat(tp.getSuperclass()).isInstanceOf(spoon.reflect.reference.CtIntersectionTypeReference.class);
+
+		CtMethod<?> combine = multi.getMethodsByName("combine").get(0);
+		assertThat(combine.getFormalCtTypeParameters()).hasSize(2);
+		assertThat(combine.getFormalCtTypeParameters().get(0).getSimpleName()).isEqualTo("K");
+		assertThat(combine.getFormalCtTypeParameters().get(1).getSimpleName()).isEqualTo("V");
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(multi);
+		assertThat(text)
+				.contains("class MultiBound<T extends java.io.Serializable & CharSequence> {")
+				.contains("function combine<K, V>(k : K, v : V) : String {");
+	}
+
+	@Test
+	void genericInterfaceAndStructure() {
+		CtType<?> container = type("demo.Container");
+		assertThat(container).isNotNull().isInstanceOf(CtInterface.class);
+		assertThat(container.getFormalCtTypeParameters()).hasSize(1);
+		assertThat(container.getFormalCtTypeParameters().get(0).getSimpleName()).isEqualTo("E");
+
+		String containerText = new GosuPrettyPrinter(factory.getEnvironment()).printType(container);
+		assertThat(containerText)
+				.contains("interface Container<E> {")
+				.contains("function add(elem : E)")
+				.contains("function get(idx : int) : E");
+
+		CtType<?> pair = type("demo.Pair");
+		assertThat(pair).isNotNull().isInstanceOf(CtInterface.class);
+		assertThat(GosuPrettyPrinter.isGosuStructure(pair)).isTrue();
+		assertThat(pair.getFormalCtTypeParameters()).hasSize(2);
+		assertThat(pair.getFormalCtTypeParameters().get(0).getSimpleName()).isEqualTo("A");
+		assertThat(pair.getFormalCtTypeParameters().get(1).getSimpleName()).isEqualTo("B");
+
+		String pairText = new GosuPrettyPrinter(factory.getEnvironment()).printType(pair);
+		assertThat(pairText)
+				.contains("structure Pair<A, B> {")
+				.contains("function first() : A")
+				.contains("function second() : B");
+	}
+
+	@Test
 	void transformDemo() {
 		CtType<?> greeter = type("demo.Greeter");
 		CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
@@ -725,7 +833,7 @@ class GosuRoundTripTest {
 	@Test
 	void roundTripFixpointInFreshJvm() throws Exception {
 		List<CtType<?>> types = builder.buildAll(srcDir);
-		assertThat(types).hasSize(14);
+		assertThat(types).hasSize(18);
 
 		File outDir = new File("target/test-roundtrip");
 		deleteRecursively(outDir);
