@@ -10,20 +10,20 @@ Spoon is an open-source library to analyze, rewrite, transform, transpile Java s
 
 ## spoon-gosu (Gosu-backed model builder)
 
-This fork adds the `spoon-gosu` module: a Spoon frontend for the [Gosu](https://gosu-lang.org) language. It parses `.gs` (classes) and `.gsx` (enhancements) through the Gosu compiler, builds a standard Spoon `Ct` metamodel, and pretty-prints it back as valid Gosu, so all of Spoon's analysis and transformation API works on Gosu sources.
+This fork adds the `spoon-gosu` module: a comprehensive Spoon frontend for the [Gosu](https://gosu-lang.org) language. It parses `.gs` (classes, interfaces, structures, enums, annotations) and `.gsx` (enhancements) through the Gosu compiler, builds a standard Spoon `Ct` metamodel, and pretty-prints it back as valid Gosu, enabling all of Spoon's analysis and transformation APIs on Gosu source trees.
 
 ### Build and test
 
-`spoon-gosu` is wired into the `spoon-pom` reactor, so it builds and tests with the rest of the modules (and is covered by the CI `test`/`extra` jobs, including checkstyle and license-header checks):
+`spoon-gosu` is wired into the `spoon-pom` reactor, so it builds and tests with the rest of the modules (and is covered by checkstyle and license-header checks):
 
 ```
-mvn -f spoon-pom test
+mvn -f spoon-pom test -pl '../spoon-gosu'
 ```
 
 ### Command-line usage
 
 ```
-java -cp ... spoon.gosu.GosuLauncher -s srcDir [-o outDir]
+java -cp spoon-gosu/target/spoon-gosu-11.5.1-SNAPSHOT.jar:... spoon.gosu.GosuLauncher -s srcDir [-o outDir]
 ```
 
 Parses every `.gs`/`.gsx` file under `srcDir` into a Ct model and pretty-prints it back as Gosu (to stdout, or written under the matching package directories when `-o` is given).
@@ -31,29 +31,45 @@ Parses every `.gs`/`.gsx` file under `srcDir` into a Ct model and pretty-prints 
 ### API
 
 ```java
+// 1. Initialize Gosu environment with your source roots
 GosuEnvironment gosu = GosuEnvironment.initialize(
-        Collections.singletonList(new File("src")));   // compile the sources once
+        Collections.singletonList(new File("src")));
+
+// 2. Build the Spoon Ct metamodel
 Launcher launcher = new Launcher();
 Factory factory = launcher.getFactory();
 GosuModelBuilder builder = new GosuModelBuilder(factory, gosu);
-List<CtType<?>> types = builder.buildAll(new File("src")); // Spoon Ct model
+List<CtType<?>> types = builder.buildAll(new File("src"));
 
+// 3. Analyze, transform, or generate elements
+CtType<?> myType = types.get(0);
+
+// 4. Pretty-print back to valid Gosu code
 GosuPrettyPrinter printer = new GosuPrettyPrinter(factory.getEnvironment());
-String gosu = printer.printType(types.get(0));             // back to Gosu text
+String gosuCode = printer.printType(myType);
 ```
 
-### Coverage
+### Language Feature Coverage
 
-- Broad statement/expression coverage: constructors, collection initializers (`{1, 2, 3}`), ranges (`0..|n`), arrays/maps, switch/do-while/throw/try-catch-finally, closures of the expression level, etc.
-- Resolved type references from Gosu's symbol tables (invocation declaring/return types, array reads, local/field/parameter types), not loose `Object` placeholders.
-- Enhancements are modeled as enhancement `CtType`s (see `GosuPrettyPrinter.isGosuEnhancement` and `enhancedTypeOf`) — the enhanced type is carried in a `spoon.gosu.meta.GosuEnhancedType` marker annotation instead of a fake superclass, and `this` inside enhancement bodies is typed as the enhanced type.
-- `uses` clauses become real `CtImport` elements; round-tripped output is a stable Gosu fixpoint (transforms survive a fresh re-parse).
-- Tests (13) in `spoon-gosu` cover model shape, printing, import fidelity, a fresh-JVM round-trip fixpoint, and model transforms.
+- **Type Declarations**: Classes, interfaces, structures (`structure Foo`), enhancements (`enhancement Foo : Bar`), enums (`enum Color`), and custom annotations (`annotation Tag`).
+- **Members & Properties**: Constructors (`construct(...)`), methods (`function name(...) : T`), and property getters/setters (`property get Prop() : T`, `property set Prop(val : T)`).
+- **Generics**: Type parameters and multi-bounds (`<T extends Comparable<T> & Serializable>`) on classes, interfaces, structures, and methods.
+- **Annotations**: Annotations on types, fields, methods, parameters, and constructors, with support for annotation attribute expressions.
+- **Closures & Lambdas**: Gosu block expressions (`\ x : int -> x + 1`, `\ x -> { ... }`) mapped to `CtLambda`.
+- **Collections & Literals**: List/set initializers (`{ 1, 2, 3 }`), array initializers (`[ 1, 2, 3 ]`), map initializers, and numeric/string/boolean/null literals.
+- **Operators & Null-Safety**: Null-safe navigation (`?.`), null-safe member expansion (`*:`), relational and binary arithmetic operators.
+- **Intervals & Ranges**: Interval expressions (`0..10`, `0..|n`) mapped to expressions.
+- **Resource Management**: `using (var r = ...) { ... }` and `using (r) { ... }` statements mapped to `CtTryWithResource`.
+- **Specialized Expressions**: `typeis` (mapped to `INSTANCEOF` binary operator), `typeof`, type casting `as` (`(obj as String)`), and `eval(...)`.
+- **Imports & Fixpoint**: `uses` clauses are represented as real `CtImport` elements; round-tripped output reaches a stable Gosu fixpoint across fresh JVM re-parsing passes.
+- **AST Synthesis & Helpers**: `GosuPrettyPrinter.tagEnhancement`, `tagStructure`, `tagPropertyGet`, `tagPropertySet`, and `tagGosuKind` for synthesizing and transforming Gosu constructs from scratch.
 
-### Notes
+### Test Suite
 
-- `class`/`enhancement` types carry a `spoon.gosu.meta.GosuKind` marker annotation (`CLASS`/`ENHANCEMENT`) so consumers can distinguish them.
-- Output styling intentionally follows Spoon/Java conventions where Gosu is looser: field reads print as `this._name`, local-var statements may carry a trailing `;`. Both re-parse cleanly.
+The test suite in `spoon-gosu` includes 35 comprehensive automated tests:
+- `GosuRoundTripTest`: 27 tests covering model shape, expressions, statements, generics, annotations, null-safety, closures, properties, and a 21-type 2-pass fresh JVM fixpoint round-trip.
+- `GosuLauncherTest`: 5 tests covering CLI execution, stdout/file export modes, argument validation, and import reconstruction.
+- `GosuTransformationTest`: 3 tests covering synthesizing classes, enhancements, and structures from scratch, AST mutations, and re-compilation in Gosu.
 
 ## Documentation
 
