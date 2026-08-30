@@ -17,6 +17,8 @@ import gw.lang.parser.ISymbol;
 import gw.lang.parser.IStatement;
 import gw.lang.parser.expressions.IBooleanLiteralExpression;
 import gw.lang.parser.expressions.IBeanMethodCallExpression;
+import gw.lang.parser.expressions.IBlockExpression;
+import gw.lang.parser.expressions.IBlockInvocation;
 import gw.lang.parser.expressions.ICharLiteralExpression;
 import gw.lang.parser.expressions.ICollectionInitializerExpression;
 import gw.lang.parser.expressions.IConditionalAndExpression;
@@ -40,6 +42,7 @@ import gw.lang.parser.expressions.ITypeAsExpression;
 import gw.lang.parser.expressions.IUnaryExpression;
 import gw.lang.parser.expressions.IUnaryNotPlusMinusExpression;
 import gw.lang.parser.expressions.IVarStatement;
+import gw.lang.parser.statements.IAssertStatement;
 import gw.lang.parser.statements.IAssignmentStatement;
 import gw.lang.parser.statements.IBeanMethodCallStatement;
 import gw.lang.parser.statements.IBreakStatement;
@@ -59,12 +62,14 @@ import gw.lang.parser.statements.IStatementList;
 import gw.lang.parser.statements.ISwitchStatement;
 import gw.lang.parser.statements.IThrowStatement;
 import gw.lang.parser.statements.ITryCatchFinallyStatement;
+import gw.lang.parser.statements.IUsingStatement;
 import gw.lang.parser.statements.IWhileStatement;
 import gw.lang.reflect.IType;
 import gw.lang.reflect.IPropertyInfo;
 import gw.lang.reflect.gs.ICompilableType;
 import spoon.reflect.code.BinaryOperatorKind;
 import spoon.reflect.code.CtArrayRead;
+import spoon.reflect.code.CtAssert;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtCase;
@@ -75,6 +80,7 @@ import spoon.reflect.code.CtDo;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtForEach;
 import spoon.reflect.code.CtIf;
+import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtNewArray;
@@ -583,6 +589,18 @@ public class GosuModelBuilder {
 			}
 			return v;
 		}
+		if (el instanceof IAssertStatement) {
+			IAssertStatement as = (IAssertStatement) el;
+			CtAssert<Object> ctAssert = factory.createAssert();
+			ctAssert.setAssertExpression(castBool(mapExpression(as.getCondition(), ctAssert)));
+			if (as.getDetail() != null) {
+				ctAssert.setExpression(mapExpression(as.getDetail(), ctAssert));
+			}
+			return ctAssert;
+		}
+		if (el instanceof IUsingStatement) {
+			return factory.createCodeSnippetStatement(sourceSlice(el));
+		}
 		return null;
 	}
 
@@ -622,6 +640,12 @@ public class GosuModelBuilder {
 	private CtExpression<Object> mapExpression(IParsedElement el, CtElement context) {
 		if (context == null) {
 			throw new IllegalArgumentException("context must not be null");
+		}
+		if (el instanceof gw.lang.parser.IExpression
+				&& ((gw.lang.parser.IExpression) el).isNullSafe()) {
+			// Null-safe member chains (l.?size()) have no JLS counterpart;
+			// keep the source text verbatim as a snippet.
+			return snippet(sourceSlice(el));
 		}
 		if (el instanceof IStringLiteralExpression) {
 			return expr(literal(((IStringLiteralExpression) el).getValue()));
@@ -747,8 +771,47 @@ public class GosuModelBuilder {
 			read.setType(mapType(acc.getType()));
 			return read;
 		}
+		if (el instanceof gw.lang.parser.expressions.INotAWordExpression) {
+			// Gosu wraps some call expressions (e.g. block invocations) in a
+			// "not a word" placeholder; map the real contained expression.
+			List<gw.lang.parser.IExpression> kids = new ArrayList<>();
+			el.getContainedParsedElementsByType(gw.lang.parser.IExpression.class, kids);
+			for (gw.lang.parser.IExpression kid : kids) {
+				if (!(kid instanceof gw.lang.parser.expressions.INotAWordExpression)) {
+					return mapExpression(kid, context);
+				}
+			}
+		}
+		if (el instanceof IBlockExpression) {
+			return buildLambda((IBlockExpression) el, context);
+		}
+		if (el instanceof IBlockInvocation) {
+			// A direct block call (b(3)) is not a member invocation; keep it verbatim.
+			return snippet(sourceSlice(el));
+		}
 		throw new UnsupportedOperationException(
-				"unsupported Gosu expression " + el.getClass().getName());
+				"unsupported Gosu expression " + el.getClass().getName()
+						+ " text=[" + sourceSlice(el) + "]");
+	}
+
+	private CtExpression<Object> buildLambda(IBlockExpression block, CtElement context) {
+		CtLambda<Object> lambda = factory.createLambda();
+		for (ISymbol param : block.getArgs()) {
+			CtParameter<Object> p = factory.createParameter();
+			p.setSimpleName(param.getName());
+			p.setType(mapType(param.getType()));
+			lambda.addParameter(p);
+		}
+		IParsedElement body = block.getBody();
+		if (body instanceof gw.lang.parser.IExpression) {
+			lambda.setExpression(cast(mapExpression((gw.lang.parser.IExpression) body, lambda)));
+		} else {
+			lambda.setExpression(cast(snippet(sourceSlice(body))));
+		}
+		CtTypeReference<Object> ret = mapType(
+				((gw.lang.reflect.IFunctionType) block.getType()).getReturnType());
+		lambda.setType(ret);
+		return lambda;
 	}
 
 	private CtExpression<Object> construct(INewExpression nw, CtElement context) {
@@ -969,7 +1032,24 @@ public class GosuModelBuilder {
 		if (type == null) {
 			return (CtTypeReference<T>) factory.Type().createReference("java.lang.Object");
 		}
-		return (CtTypeReference<T>) createGenericRef(abbreviate(type.getName()));
+		String name = abbreviate(type.getName());
+		if (name.indexOf('(') >= 0) {
+			// The block/closure type (e.g. block(int):int) is not JLS-valid,
+			// so it must be held verbatim, bypassing identifier validation.
+			return (CtTypeReference<T>) nonJlsReference(name);
+		}
+		return (CtTypeReference<T>) createGenericRef(name);
+	}
+
+	/** Creates a type reference whose name is not a JLS identifier (block types). */
+	private CtTypeReference<Object> nonJlsReference(String name) {
+		boolean ignore = factory.getEnvironment().getIgnoreSyntaxErrors();
+		factory.getEnvironment().setIgnoreSyntaxErrors(true);
+		try {
+			return factory.Type().createReference(name);
+		} finally {
+			factory.getEnvironment().setIgnoreSyntaxErrors(ignore);
+		}
 	}
 
 	/** Creates a type reference from a possibly generic name, with real type args. */

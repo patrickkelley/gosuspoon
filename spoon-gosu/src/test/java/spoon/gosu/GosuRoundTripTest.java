@@ -4,11 +4,13 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import spoon.Launcher;
 import spoon.reflect.code.CtArrayRead;
+import spoon.reflect.code.CtAssert;
 import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtConditional;
 import spoon.reflect.code.CtFieldRead;
 import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtInvocation;
+import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtThisAccess;
 import spoon.reflect.declaration.CtField;
@@ -248,6 +250,60 @@ class GosuRoundTripTest {
 				+ "    return this._nums.size() * 2\n"
 				+ "  }\n"
 				+ "}\n");
+		write("target/test-gsrc/demo/Funcs.gs",
+				"package demo\n"
+				+ "uses java.util.List\n"
+				+ "class Funcs {\n"
+				+ "  var _double : block(x : int) : int\n"
+				+ "  construct() {\n"
+				+ "    _double = \\ p : int -> p * 2\n"
+				+ "    var triple = \\ q : int -> q * 3\n"
+				+ "    print(_double(5))\n"
+				+ "    print(triple(4))\n"
+				+ "    var fs = { \\ a : int -> a + 1, \\ b : int -> b - 1 }\n"
+				+ "    print(apply(3, \\ x : int -> x * 10))\n"
+				+ "    var mul : block(a : int, b : int) : int = \\ a : int, b : int -> a * b\n"
+				+ "    print(mul(3, 4))\n"
+				+ "  }\n"
+				+ "  function apply(v : int, f : block(x : int) : int) : int {\n"
+				+ "    return f(v)\n"
+				+ "  }\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/Optional.gs",
+				"package demo\n"
+				+ "uses java.util.List\n"
+				+ "class Optional {\n"
+				+ "  var _empty : String\n"
+				+ "  function maybe(l : List<Integer>) : Integer {\n"
+				+ "    return l?.get(0)\n"
+				+ "  }\n"
+				+ "  function fieldMaybe() : String {\n"
+				+ "    return _empty?.substring(1)\n"
+				+ "  }\n"
+				+ "}\n");
+		write("target/test-gsrc/demo/Misc.gs",
+				"package demo\n"
+				+ "uses java.util.List\n"
+				+ "uses java.io.*\n"
+				+ "class Misc {\n"
+				+ "  var _items : List<Integer>\n"
+				+ "  construct() {\n"
+				+ "    _items = { 1, 2, 3 }\n"
+				+ "  }\n"
+				+ "  function check(n : int) {\n"
+				+ "    assert n > 0 : \"n must be positive\"\n"
+				+ "    using (new StringWriter()) {\n"
+				+ "      print(_items.size())\n"
+				+ "    }\n"
+				+ "  }\n"
+				+ "  function sum() : int {\n"
+				+ "    var total = 0\n"
+				+ "    for (i in 0..|_items.size()) {\n"
+				+ "      total += i\n"
+				+ "    }\n"
+				+ "    return total\n"
+				+ "  }\n"
+				+ "}\n");
 
 		gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
 		factory = new Launcher().getFactory();
@@ -259,7 +315,7 @@ class GosuRoundTripTest {
 		assertThat(gosu.scanTypeNames(srcDir))
 				.containsExactlyInAnyOrder("demo.Greeter", "demo.StringExt",
 						"demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey",
-						"demo.ExtOnCtor");
+						"demo.ExtOnCtor", "demo.Funcs", "demo.Optional", "demo.Misc");
 	}
 
 	@Test
@@ -468,6 +524,75 @@ class GosuRoundTripTest {
 	}
 
 	@Test
+	void funcsAndClosuresModelShapeAndPrint() {
+		CtType<?> funcs = type("demo.Funcs");
+		assertThat(funcs).isNotNull();
+
+		List<CtLambda<?>> lambdas = funcs.getElements(e -> e instanceof CtLambda<?>);
+		assertThat(lambdas).hasSize(6);
+
+		CtLambda<?> first = lambdas.get(0);
+		assertThat(first.getParameters()).hasSize(1);
+		assertThat(first.getParameters().get(0).getSimpleName()).isEqualTo("p");
+		assertThat(first.getParameters().get(0).getType().getSimpleName()).isEqualTo("int");
+		assertThat(first.getType().getSimpleName()).isEqualTo("int");
+
+		CtLambda<?> binaryLambda = lambdas.get(5);
+		assertThat(binaryLambda.getParameters()).hasSize(2);
+		assertThat(binaryLambda.getParameters().get(0).getSimpleName()).isEqualTo("a");
+		assertThat(binaryLambda.getParameters().get(1).getSimpleName()).isEqualTo("b");
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(funcs);
+		assertThat(text)
+				.contains("var _double : block(int):int")
+				.contains("this._double = \\ p : int -> p * 2")
+				.contains("var triple : block(int):int = \\ q : int -> q * 3;")
+				.contains("print(_double(5))")
+				.contains("print(triple(4))")
+				.contains("print(apply(3, \\ x : int -> x * 10))")
+				.contains("var mul : block(int, int):int = \\ a : int, b : int -> a * b;")
+				.contains("print(mul(3, 4))")
+				.contains("function apply(v : int, f : block(int):int) : int {")
+				.contains("return f(v)");
+	}
+
+	@Test
+	void optionalChainingModelShapeAndPrint() {
+		CtType<?> opt = type("demo.Optional");
+		assertThat(opt).isNotNull();
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(opt);
+		assertThat(text)
+				.contains("var _empty : String")
+				.contains("function maybe(l : List<Integer>) : Integer {")
+				.contains("return l?.get(0)")
+				.contains("function fieldMaybe() : String {")
+				.contains("return _empty?.substring(1)");
+	}
+
+	@Test
+	void miscStatementsModelShapeAndPrint() {
+		CtType<?> misc = type("demo.Misc");
+		assertThat(misc).isNotNull();
+
+		List<CtAssert<?>> asserts = misc.getElements(e -> e instanceof CtAssert<?>);
+		assertThat(asserts).hasSize(1);
+		assertThat(asserts.get(0).getAssertExpression()).isNotNull();
+		assertThat(asserts.get(0).getExpression()).isNotNull();
+
+		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(misc);
+		assertThat(text)
+				.contains("var _items : List<Integer>")
+				.contains("function check(n : int) {")
+				.contains("assert n > 0 : \"n must be positive\"")
+				.contains("using (new StringWriter()) {")
+				.contains("print(_items.size())")
+				.contains("function sum() : int {")
+				.contains("for (i in 0..|_items.size()) {")
+				.contains("total = total + i");
+	}
+
+	@Test
 	void transformDemo() {
 		CtType<?> greeter = type("demo.Greeter");
 		CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
@@ -487,7 +612,7 @@ class GosuRoundTripTest {
 	@Test
 	void roundTripFixpointInFreshJvm() throws Exception {
 		List<CtType<?>> types = builder.buildAll(srcDir);
-		assertThat(types).hasSize(7);
+		assertThat(types).hasSize(10);
 
 		File outDir = new File("target/test-roundtrip");
 		deleteRecursively(outDir);

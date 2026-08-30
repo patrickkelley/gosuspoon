@@ -14,6 +14,7 @@ import spoon.reflect.code.CtCatchVariable;
 import spoon.reflect.code.CtConstructorCall;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtForEach;
+import spoon.reflect.code.CtLambda;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtNewArray;
 import spoon.reflect.code.CtStatement;
@@ -240,6 +241,28 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeSeparator(")");
 		w.writeSpace();
 		scan(ctCatch.getBody());
+	}
+
+	/** Gosu blocks are written {@code \ x : int -> expr} (not Java lambdas). */
+	@Override
+	public <T> void visitCtLambda(CtLambda<T> lambda) {
+		TokenWriter w = getPrinterTokenWriter();
+		w.writeSeparator("\\");
+		w.writeSpace();
+		List<CtParameter<?>> params = lambda.getParameters();
+		for (int i = 0; i < params.size(); i++) {
+			scan(params.get(i));
+			if (i < params.size() - 1) {
+				w.writeSeparator(",");
+				w.writeSpace();
+			}
+		}
+		w.writeSpace();
+		w.writeOperator("->");
+		w.writeSpace();
+		if (lambda.getExpression() != null) {
+			scan(lambda.getExpression());
+		}
 	}
 
 	/** Gosu case labels are {@code case <expr>:} or {@code default:}. */
