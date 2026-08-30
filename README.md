@@ -8,6 +8,53 @@
 
 Spoon is an open-source library to analyze, rewrite, transform, transpile Java source code. It parses source files to build a well-designed AST with powerful analysis and transformation API. It supports modern Java versions up to Java 25. Spoon is an official Inria open-source project, and member of the [OW2](https://www.ow2.org/) open-source consortium.
 
+## spoon-gosu (Gosu-backed model builder)
+
+This fork adds the `spoon-gosu` module: a Spoon frontend for the [Gosu](https://gosu-lang.org) language. It parses `.gs` (classes) and `.gsx` (enhancements) through the Gosu compiler, builds a standard Spoon `Ct` metamodel, and pretty-prints it back as valid Gosu, so all of Spoon's analysis and transformation API works on Gosu sources.
+
+Build and test it after installing Spoon locally (the module depends on `spoon-core` and the `spoon-pom` parent):
+
+```
+mvn install -DskipTests      # build & install Spoon (spoon-core) in the local repo
+cd spoon-gosu
+mvn test
+```
+
+### Command-line usage
+
+```
+java -cp ... spoon.gosu.GosuLauncher -s srcDir [-o outDir]
+```
+
+Parses every `.gs`/`.gsx` file under `srcDir` into a Ct model and pretty-prints it back as Gosu (to stdout, or written under the matching package directories when `-o` is given).
+
+### API
+
+```java
+GosuEnvironment gosu = GosuEnvironment.initialize(
+        Collections.singletonList(new File("src")));   // compile the sources once
+Launcher launcher = new Launcher();
+Factory factory = launcher.getFactory();
+GosuModelBuilder builder = new GosuModelBuilder(factory, gosu);
+List<CtType<?>> types = builder.buildAll(new File("src")); // Spoon Ct model
+
+GosuPrettyPrinter printer = new GosuPrettyPrinter(factory.getEnvironment());
+String gosu = printer.printType(types.get(0));             // back to Gosu text
+```
+
+### Coverage
+
+- Broad statement/expression coverage: constructors, collection initializers (`{1, 2, 3}`), ranges (`0..|n`), arrays/maps, switch/do-while/throw/try-catch-finally, closures of the expression level, etc.
+- Resolved type references from Gosu's symbol tables (invocation declaring/return types, array reads, local/field/parameter types), not loose `Object` placeholders.
+- Enhancements are modeled as enhancement `CtType`s (see `GosuPrettyPrinter.isGosuEnhancement` and `enhancedTypeOf`) — the enhanced type is carried in a `spoon.gosu.meta.GosuEnhancedType` marker annotation instead of a fake superclass, and `this` inside enhancement bodies is typed as the enhanced type.
+- `uses` clauses become real `CtImport` elements; round-tripped output is a stable Gosu fixpoint (transforms survive a fresh re-parse).
+- Tests (13) in `spoon-gosu` cover model shape, printing, import fidelity, a fresh-JVM round-trip fixpoint, and model transforms.
+
+### Notes
+
+- `class`/`enhancement` types carry a `spoon.gosu.meta.GosuKind` marker annotation (`CLASS`/`ENHANCEMENT`) so consumers can distinguish them.
+- Output styling intentionally follows Spoon/Java conventions where Gosu is looser: field reads print as `this._name`, local-var statements may carry a trailing `;`. Both re-parse cleanly.
+
 ## Documentation
 
 The latest official documentation is available at <https://spoon.gforge.inria.fr/>.
