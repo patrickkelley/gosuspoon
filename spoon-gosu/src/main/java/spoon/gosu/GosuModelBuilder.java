@@ -3,6 +3,7 @@ package spoon.gosu;
 import gw.internal.gosu.parser.DynamicFunctionSymbol;
 import gw.internal.gosu.parser.IGosuClassInternal;
 import gw.internal.gosu.parser.IGosuEnhancementInternal;
+import gw.internal.gosu.parser.MemberFieldSymbol;
 import gw.lang.parser.IParsedElement;
 import gw.lang.parser.IParseTree;
 import gw.lang.parser.ISymbol;
@@ -141,6 +142,7 @@ public class GosuModelBuilder {
 
     private CtClass<?> currentClass;
     private Set<String> currentFields = new LinkedHashSet<>();
+    private final Map<String, IType> currentFieldTypes = new LinkedHashMap<>();
     private List<String> currentUses = new ArrayList<>();
     private CharSequence currentSource;
 
@@ -237,6 +239,10 @@ public class GosuModelBuilder {
                 continue;
             }
             ctClass.addField(buildField(field));
+            if (field.getSymbol() != null) {
+                currentFieldTypes.put(
+                        field.getIdentifierName(), field.getSymbol().getType());
+            }
         }
 
         for (DynamicFunctionSymbol dfs : gs.getConstructorFunctions()) {
@@ -459,7 +465,7 @@ public class GosuModelBuilder {
             CtLocalVariable<Object> var = factory.createLocalVariable();
             ISymbol symbol = fe.getIdentifier();
             var.setSimpleName(symbol == null ? "" : symbol.getName());
-            var.setType(factory.Type().createReference("java.lang.Object"));
+            var.setType(mapType(symbol == null ? null : symbol.getType()));
             ctFor.setVariable(var);
             ctFor.setExpression(mapExpression(fe.getInExpression(), ctFor));
             ctFor.setBody(mapBodyOrStatement(fe.getStatement(), ctFor));
@@ -497,6 +503,7 @@ public class GosuModelBuilder {
             CtArrayRead<Object> lhs = factory.createArrayRead();
             lhs.setTarget(mapExpression(acc.getRootExpression(), lhs));
             lhs.setIndexExpression(castInt(mapExpression(acc.getKeyExpression(), lhs)));
+            lhs.setType(mapType(acc.getType()));
             CtAssignment<Object, Object> a = factory.createAssignment();
             a.setAssigned(lhs);
             a.setAssignment(cast(mapExpression(assign.getExpression(), a)));
@@ -588,7 +595,9 @@ public class GosuModelBuilder {
             return mapExpression(((ITypeAsExpression) el).getLHS(), context);
         }
         if (el instanceof IIntervalExpression) {
-            return snippet(sourceSlice(el));
+            CtExpression<Object> slice = snippet(sourceSlice(el));
+            slice.setType(mapType(((gw.lang.parser.IExpression) el).getType()));
+            return slice;
         }
         if (el instanceof IConditionalTernaryExpression) {
             IConditionalTernaryExpression t = (IConditionalTernaryExpression) el;
@@ -596,6 +605,7 @@ public class GosuModelBuilder {
             c.setCondition(castBool(mapExpression(t.getCondition(), c)));
             c.setThenExpression(cast(mapExpression(t.getFirst(), c)));
             c.setElseExpression(cast(mapExpression(t.getSecond(), c)));
+            c.setType(mapType(t.getType()));
             return c;
         }
         if (el instanceof IEqualityExpression) {
@@ -620,6 +630,7 @@ public class GosuModelBuilder {
             op.setKind(u.isNot() ? UnaryOperatorKind.NOT
                     : u.isBitNot() ? UnaryOperatorKind.COMPL
                     : UnaryOperatorKind.POS);
+            op.setType(mapType(u.getType()));
             return op;
         }
         if (el instanceof IUnaryExpression) {
@@ -627,6 +638,7 @@ public class GosuModelBuilder {
             CtUnaryOperator<Object> op = factory.createUnaryOperator();
             op.setOperand(cast(mapExpression(u.getExpression(), op)));
             op.setKind(UnaryOperatorKind.NEG);
+            op.setType(mapType(u.getType()));
             return op;
         }
         if (el instanceof INewExpression) {
@@ -634,14 +646,20 @@ public class GosuModelBuilder {
         }
         if (el instanceof IIdentifierExpression) {
             IIdentifierExpression id = (IIdentifierExpression) el;
-            String name = id.getSymbol() == null ? null : id.getSymbol().getName();
+            ISymbol symbol = id.getSymbol();
+            String name = symbol == null ? null : symbol.getName();
             if ("this".equals(name)) {
-                return factory.createThisAccess(currentTypeRef(), false);
+                CtExpression<Object> thisAccess =
+                        factory.createThisAccess(currentTypeRef(), false);
+                thisAccess.setType(currentTypeRef());
+                return thisAccess;
             }
-            if (name != null && currentFields.contains(name)) {
+            boolean field = name != null
+                    && (currentFields.contains(name) || symbol instanceof MemberFieldSymbol);
+            if (field) {
                 return fieldAccess(name, false);
             }
-            return variableAccess(name);
+            return variableAccess(name, symbol == null ? null : symbol.getType());
         }
         if (el instanceof IBeanMethodCallExpression) {
             return beanCall((IBeanMethodCallExpression) el, context);
@@ -649,10 +667,12 @@ public class GosuModelBuilder {
         if (el instanceof gw.lang.parser.expressions.IArithmeticExpression) {
             gw.lang.parser.expressions.IArithmeticExpression arith =
                     (gw.lang.parser.expressions.IArithmeticExpression) el;
-            return factory.createBinaryOperator(
+            CtExpression<Object> result = factory.createBinaryOperator(
                     mapExpression(arith.getLHS(), context),
                     mapExpression(arith.getRHS(), context),
                     binaryKind(arith.getOperator()));
+            result.setType(mapType(arith.getType()));
+            return result;
         }
         if (el instanceof gw.lang.parser.expressions.IMethodCallExpression) {
             return plainCall((gw.lang.parser.expressions.IMethodCallExpression) el, context);
@@ -666,6 +686,7 @@ public class GosuModelBuilder {
             CtArrayRead<Object> read = factory.createArrayRead();
             read.setTarget(mapExpression(acc.getRootExpression(), read));
             read.setIndexExpression(castInt(mapExpression(acc.getMemberExpression(), read)));
+            read.setType(mapType(acc.getType()));
             return read;
         }
         if (el instanceof IMapAccessExpression) {
@@ -673,6 +694,7 @@ public class GosuModelBuilder {
             CtArrayRead<Object> read = factory.createArrayRead();
             read.setTarget(mapExpression(acc.getRootExpression(), read));
             read.setIndexExpression(castInt(mapExpression(acc.getKeyExpression(), read)));
+            read.setType(mapType(acc.getType()));
             return read;
         }
         throw new UnsupportedOperationException(
@@ -684,7 +706,7 @@ public class GosuModelBuilder {
             ICollectionInitializerExpression ini =
                     (ICollectionInitializerExpression) nw.getInitializer();
             CtNewArray<Object> arr = factory.createNewArray();
-            arr.setType(factory.Type().createReference("java.lang.Object"));
+            arr.setType(mapType(nw.getType()));
             for (gw.lang.parser.IExpression item : ini.getValues()) {
                 arr.addElement(cast(mapExpression(item, arr)));
             }
@@ -725,19 +747,27 @@ public class GosuModelBuilder {
     private CtExpression<Object> binary(IConditionalExpression expr,
                                         BinaryOperatorKind kind,
                                         CtElement context) {
-        return factory.createBinaryOperator(
+        CtExpression<Object> result = factory.createBinaryOperator(
                 mapExpression(expr.getLHS(), context),
                 mapExpression(expr.getRHS(), context),
                 kind);
+        result.setType(mapType(expr.getType()));
+        return result;
     }
 
     private CtExpression<Object> beanCall(IBeanMethodCallExpression bean, CtElement context) {
+        gw.lang.parser.IExpression root = bean.getRootExpression();
+        CtTypeReference<Object> declaring = isThis(root) || root == null
+                || root.getType() == null
+                ? currentTypeRef()
+                : mapType(root.getType());
         CtExecutableReference<Object> ref = factory.Executable().createReference(
-                currentTypeRef(),
-                factory.Type().createReference("java.lang.Object"),
+                declaring,
+                mapType(bean.getType()),
                 bean.getMemberName());
         List<CtExpression<?>> args = new ArrayList<>();
-        for (gw.lang.parser.IExpression arg : bean.getArgs()) {
+        for (gw.lang.parser.IExpression arg
+                : bean.getArgs() == null ? new gw.lang.parser.IExpression[0] : bean.getArgs()) {
             args.add(mapExpression(arg, context));
         }
         return factory.createInvocation(
@@ -750,7 +780,7 @@ public class GosuModelBuilder {
                 ? null : call.getFunctionSymbol().getDisplayName();
         CtExecutableReference<Object> ref = factory.Executable().createReference(
                 currentTypeRef(),
-                factory.Type().createReference("java.lang.Object"),
+                mapType(call.getType()),
                 name == null ? "call" : name);
         List<CtExpression<?>> args = new ArrayList<>();
         for (gw.lang.parser.IExpression arg : call.getArgs()) {
@@ -764,36 +794,43 @@ public class GosuModelBuilder {
             return memberAccess((IMemberAccessExpression) el, true, null);
         }
         IIdentifierExpression id = (IIdentifierExpression) el;
-        String name = id.getSymbol() == null ? null : id.getSymbol().getName();
+        ISymbol symbol = id.getSymbol();
+        String name = symbol == null ? null : symbol.getName();
         if ("this".equals(name)) {
             return factory.createThisAccess(currentTypeRef(), false);
         }
         if (name != null && currentFields.contains(name)) {
             return fieldAccess(name, true);
         }
-        return variableAccess(name);
+        return variableAccess(name, symbol == null ? null : symbol.getType());
     }
 
-    private CtExpression<Object> variableAccess(String name) {
+    private CtExpression<Object> variableAccess(String name, IType type) {
         CtVariableReference<Object> ref = factory.createParameterReference();
         ref.setSimpleName(name);
+        if (type != null) {
+            ref.setType(mapType(type));
+        }
         return factory.createVariableRead(ref, false);
     }
 
     private CtExpression<Object> fieldAccess(String name, boolean write) {
         CtFieldReference<Object> ref = factory.Field().createReference(
-                currentTypeRef(), factory.Type().createReference("java.lang.Object"), name);
+                currentTypeRef(), mapType(currentFieldTypes.get(name)), name);
         return variableAccess(ref, write);
     }
 
     private CtExpression<Object> memberAccess(IMemberAccessExpression member,
                                               boolean write,
                                               CtElement context) {
-        CtFieldReference<Object> ref = factory.Field().createReference(
-                currentTypeRef(), factory.Type().createReference("java.lang.Object"),
-                member.getMemberName());
-        CtExpression<Object> access = variableAccess(ref, write);
         gw.lang.parser.IExpression root = member.getRootExpression();
+        CtTypeReference<Object> declaring = isThis(root) || root == null
+                || root.getType() == null
+                ? currentTypeRef()
+                : mapType(root.getType());
+        CtFieldReference<Object> ref = factory.Field().createReference(
+                declaring, mapType(member.getType()), member.getMemberName());
+        CtExpression<Object> access = variableAccess(ref, write);
         if (root != null && isThis(root)) {
             ((spoon.reflect.code.CtFieldAccess<Object>) (CtExpression<?>) access)
                     .setTarget(factory.createThisAccess(currentTypeRef(), false));

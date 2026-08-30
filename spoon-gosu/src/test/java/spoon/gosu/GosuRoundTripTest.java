@@ -3,6 +3,11 @@ package spoon.gosu;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import spoon.Launcher;
+import spoon.reflect.code.CtArrayRead;
+import spoon.reflect.code.CtBinaryOperator;
+import spoon.reflect.code.CtConditional;
+import spoon.reflect.code.CtInvocation;
+import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.declaration.CtField;
 import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtType;
@@ -159,6 +164,38 @@ class GosuRoundTripTest {
                 + "    return new Ctor1()\n"
                 + "  }\n"
                 + "}\n");
+        write("target/test-gsrc/demo/Typey.gs",
+                "package demo\n"
+                + "uses java.util.List\n"
+                + "uses java.util.Map\n"
+                + "uses java.util.ArrayList\n"
+                + "class Typey {\n"
+                + "  var _items : List<String>\n"
+                + "  var _m : Map<Integer, String>\n"
+                + "  function size() : int {\n"
+                + "    return _items.size()\n"
+                + "  }\n"
+                + "  function first() : String {\n"
+                + "    return _items[0]\n"
+                + "  }\n"
+                + "  function mapLen() : int {\n"
+                + "    return _m.size()\n"
+                + "  }\n"
+                + "  function get(k : int) : String {\n"
+                + "    return _m[k]\n"
+                + "  }\n"
+                + "  function build() : List<Integer> {\n"
+                + "    var l : List<Integer> = new ArrayList<Integer>()\n"
+                + "    l.add(1)\n"
+                + "    return l\n"
+                + "  }\n"
+                + "  function pick(b : boolean) : int {\n"
+                + "    return b ? 1 : 2\n"
+                + "  }\n"
+                + "  function add(a : int, b : int) : int {\n"
+                + "    return a + b\n"
+                + "  }\n"
+                + "}\n");
         write("target/test-gsrc/demo/Switchy.gs",
                 "package demo\n"
                 + "class Switchy {\n"
@@ -203,7 +240,7 @@ class GosuRoundTripTest {
     void bootstrapScansAllTypes() {
         assertThat(gosu.scanTypeNames(srcDir))
                 .containsExactlyInAnyOrder("demo.Greeter", "demo.StringExt",
-                        "demo.KitchenSink", "demo.Ctor1", "demo.Switchy");
+                        "demo.KitchenSink", "demo.Ctor1", "demo.Switchy", "demo.Typey");
     }
 
     @Test
@@ -326,6 +363,40 @@ class GosuRoundTripTest {
     }
 
     @Test
+    void resolvedTypesCarriedInModel() {
+        CtType<?> ty = type("demo.Typey");
+        assertThat(ty).isNotNull();
+        assertThat(GosuLauncher.usesOf(builder, ty)).containsExactly(
+                "java.util.List", "java.util.Map", "java.util.ArrayList");
+
+        List<CtInvocation<?>> sizes = ty.getElements(e ->
+                e instanceof CtInvocation<?> && e.getExecutable().getSimpleName().equals("size"));
+        assertThat(sizes).hasSize(2);
+        assertThat(sizes.stream().map(i -> i.getExecutable().getDeclaringType().getSimpleName()))
+                .containsExactlyInAnyOrder("List", "Map");
+        assertThat(sizes).allSatisfy(i ->
+                assertThat(i.getType().getSimpleName()).isEqualTo("int"));
+
+        List<CtArrayRead<?>> reads = ty.getElements(e -> e instanceof CtArrayRead<?>);
+        assertThat(reads).hasSize(2);
+        assertThat(reads).allSatisfy(r ->
+                assertThat(r.getType().getSimpleName()).isEqualTo("String"));
+
+        CtLocalVariable<?> local = (CtLocalVariable<?>) ty.getElements(e ->
+                e instanceof CtLocalVariable<?> && ((CtLocalVariable<?>) e).getSimpleName().equals("l")).get(0);
+        assertThat(((CtTypeReference<?>) local.getType()).getSimpleName()).isEqualTo("List");
+        assertThat(((CtTypeReference<?>) local.getType()).getActualTypeArguments()).hasSize(1);
+
+        List<CtConditional<?>> conditionals = ty.getElements(e -> e instanceof CtConditional<?>);
+        assertThat(conditionals).hasSize(1);
+        assertThat(conditionals.get(0).getType().getSimpleName()).isEqualTo("int");
+
+        List<CtBinaryOperator<?>> bins = ty.getElements(e -> e instanceof CtBinaryOperator<?>);
+        assertThat(bins).hasSize(1);
+        assertThat(bins.get(0).getType().getSimpleName()).isEqualTo("int");
+    }
+
+    @Test
     void controlFlowRemainderModelShape() {
         CtType<?> sw = type("demo.Switchy");
         assertThat(sw).isNotNull();
@@ -367,7 +438,7 @@ class GosuRoundTripTest {
     @Test
     void roundTripFixpointInFreshJvm() throws Exception {
         List<CtType<?>> types = builder.buildAll(srcDir);
-        assertThat(types).hasSize(5);
+        assertThat(types).hasSize(6);
 
         File outDir = new File("target/test-roundtrip");
         deleteRecursively(outDir);
