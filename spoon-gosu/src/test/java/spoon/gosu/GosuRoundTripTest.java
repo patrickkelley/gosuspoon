@@ -7,6 +7,7 @@ import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtBinaryOperator;
 import spoon.reflect.code.CtConditional;
 import spoon.reflect.code.CtFieldRead;
+import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtInvocation;
 import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtThisAccess;
@@ -19,11 +20,15 @@ import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.declaration.CtImport;
 import spoon.reflect.declaration.CtImportKind;
 import spoon.reflect.reference.CtFieldReference;
+import spoon.reflect.visitor.CtScanner;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import spoon.reflect.declaration.CtElement;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -519,6 +524,116 @@ class GosuRoundTripTest {
         String pass2 = runFresh("spoon.gosu.GosuLauncher", "-s",
                 outDir.getAbsolutePath(), "-o", out2.getAbsolutePath());
         assertThat(pass2).doesNotContain("UnsupportedOperationException");
+    }
+
+    @Test
+    void scannerAndReflectionTraversal() {
+        CtType<?> greeter = type("demo.Greeter");
+        AtomicInteger methods = new AtomicInteger();
+        AtomicInteger fields = new AtomicInteger();
+        new CtScanner() {
+            @Override
+            public <T> void visitCtMethod(CtMethod<T> m) {
+                methods.incrementAndGet();
+                super.visitCtMethod(m);
+            }
+
+            @Override
+            public <T> void visitCtField(CtField<T> f) {
+                fields.incrementAndGet();
+                super.visitCtField(f);
+            }
+        }.scan(greeter);
+        assertThat(methods.get()).isEqualTo(greeter.getMethods().size());
+        assertThat(fields.get()).isEqualTo(greeter.getFields().size());
+
+        CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
+        assertThat(greet.getDeclaringType().getQualifiedName()).isEqualTo("demo.Greeter");
+        assertThat(greeter.getElements(e -> e instanceof CtField<?>
+                && "_tags".equals(((CtField<?>) e).getSimpleName()))).hasSize(1);
+
+        // every element is reachable back to a root through its parents
+        CtElement leaf = greet.getBody().getStatement(0);
+        CtElement node = leaf;
+        int depth = 0;
+        while (node.getParent() != null) {
+            node = node.getParent();
+            depth++;
+        }
+        assertThat(depth).isGreaterThan(4);
+    }
+
+    @Test
+    void cloneTransformReprintAndReparseInFreshJvm() throws Exception {
+        // brand-new model, independent of any other test's mutations
+        CtType<?> greeter = type("demo.Greeter");
+
+        CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
+        CtMethod<?> loud = factory.Core().clone(greet);
+        loud.setSimpleName("loudGreet");
+        ((CtLiteral<String>) loud.getElements(e -> e instanceof CtLiteral<?>).get(0))
+                .setValue("WHOOP");
+        ((CtLiteral<String>) greet.getElements(e -> e instanceof CtLiteral<?>).get(0))
+                .setValue("Salaam ");
+        greeter.addMethod(loud);
+
+        CtField<Integer> age = factory.createField();
+        age.setSimpleName("_age");
+        age.setType(factory.Type().createReference("int"));
+        greeter.addField(age);
+        greeter.getFields().stream()
+                .filter(f -> "_tags".equals(f.getSimpleName()))
+                .forEach(CtField::delete);
+
+        GosuPrettyPrinter printer = new GosuPrettyPrinter(factory.getEnvironment());
+        String text = printer.printType(greeter);
+        assertThat(text)
+                .contains("var _age : int")
+                .contains("var _name : String")
+                .contains("function greet() : String {")
+                .contains("return \"Salaam \" + this._name")
+                .contains("function loudGreet() : String {")
+                .contains("return \"WHOOP\" + this._name")
+                .doesNotContain("var _tags");
+
+        // snipper: an individual method can be printed standalone
+        assertThat(printer.printElement(greeter.getMethodsByName("loudGreet").get(0)))
+                .contains("function loudGreet() : String {")
+                .contains("return \"WHOOP\" + this._name");
+
+        // write the transformed model and re-parse it in a fresh JVM
+        File dir = new File("target/test-transform");
+        deleteRecursively(dir);
+        StringBuilder out = new StringBuilder("package demo\n\n");
+        for (String use : GosuLauncher.usesOf(builder, greeter)) {
+            out.append("uses ").append(use).append("\n");
+        }
+        out.append("\n").append(text).append("\n");
+        File file = new File(dir, "demo/Greeter.gs");
+        file.getParentFile().mkdirs();
+        Files.write(file.toPath(), out.toString().getBytes(StandardCharsets.UTF_8));
+
+        File out2 = new File("target/test-transform/out2");
+        File out3 = new File("target/test-transform/out3");
+        out2.mkdirs();
+        out3.mkdirs();
+        assertThat(runFresh("spoon.gosu.GosuLauncher", "-s",
+                dir.getAbsolutePath(), "-o", out2.getAbsolutePath()))
+                .doesNotContain("UnsupportedOperationException");
+        assertThat(runFresh("spoon.gosu.GosuLauncher", "-s",
+                out2.getAbsolutePath(), "-o", out3.getAbsolutePath()))
+                .doesNotContain("UnsupportedOperationException");
+
+        String reparsed = new String(Files.readAllBytes(
+                new File(out2, "demo/Greeter.gs").toPath()), StandardCharsets.UTF_8);
+        assertThat(reparsed)
+                .contains("var _age : int")
+                .contains("function loudGreet() : String {")
+                .contains("return \"Salaam \" + this._name")
+                .doesNotContain("var _tags");
+        // fixpoint: pass 2 and pass 3 bytes are identical
+        assertThat(Files.readAllBytes(new File(out3, "demo/Greeter.gs").toPath()))
+                .isEqualTo(Files.readAllBytes(new File(out2, "demo/Greeter.gs").toPath()));
     }
 
     private static String runFresh(String mainClass, String... args) throws Exception {
