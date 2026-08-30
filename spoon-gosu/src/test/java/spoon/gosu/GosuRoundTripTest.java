@@ -159,6 +159,40 @@ class GosuRoundTripTest {
                 + "    return new Ctor1()\n"
                 + "  }\n"
                 + "}\n");
+        write("target/test-gsrc/demo/Switchy.gs",
+                "package demo\n"
+                + "class Switchy {\n"
+                + "  function pickDay(d : int) : String {\n"
+                + "    switch (d) {\n"
+                + "      case 1:\n"
+                + "        return \"one\"\n"
+                + "      case 2:\n"
+                + "        return \"two\"\n"
+                + "      default:\n"
+                + "        return \"other\"\n"
+                + "    }\n"
+                + "    return \"none\"\n"
+                + "  }\n"
+                + "  function descend(n : int) : int {\n"
+                + "    var i = n\n"
+                + "    do {\n"
+                + "      i = i - 1\n"
+                + "    } while (i > 0)\n"
+                + "    return i\n"
+                + "  }\n"
+                + "  function risky(x : int) : int {\n"
+                + "    try {\n"
+                + "      return 10 / x\n"
+                + "    } catch (e : Exception) {\n"
+                + "      return -1\n"
+                + "    } finally {\n"
+                + "      print(\"done\")\n"
+                + "    }\n"
+                + "  }\n"
+                + "  function boom() {\n"
+                + "    throw new RuntimeException(\"bad\")\n"
+                + "  }\n"
+                + "}\n");
 
         gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
         factory = new Launcher().getFactory();
@@ -169,7 +203,7 @@ class GosuRoundTripTest {
     void bootstrapScansAllTypes() {
         assertThat(gosu.scanTypeNames(srcDir))
                 .containsExactlyInAnyOrder("demo.Greeter", "demo.StringExt",
-                        "demo.KitchenSink", "demo.Ctor1");
+                        "demo.KitchenSink", "demo.Ctor1", "demo.Switchy");
     }
 
     @Test
@@ -292,6 +326,28 @@ class GosuRoundTripTest {
     }
 
     @Test
+    void controlFlowRemainderModelShape() {
+        CtType<?> sw = type("demo.Switchy");
+        assertThat(sw).isNotNull();
+
+        String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(sw);
+        assertThat(text)
+                .contains("function pickDay(d : int) : String {")
+                .contains("switch (d) {")
+                .contains("case 1:")
+                .contains("case 2:")
+                .contains("default:")
+                .contains("function descend(n : int) : int {")
+                .contains("do {")
+                .contains("} while (i > 0 )")
+                .contains("function risky(x : int) : int {")
+                .contains("try {")
+                .contains("}catch (e : Exception) {")
+                .contains("} finally {")
+                .contains("throw new RuntimeException");
+    }
+
+    @Test
     void transformDemo() {
         CtType<?> greeter = type("demo.Greeter");
         CtMethod<?> greet = greeter.getMethodsByName("greet").get(0);
@@ -311,7 +367,7 @@ class GosuRoundTripTest {
     @Test
     void roundTripFixpointInFreshJvm() throws Exception {
         List<CtType<?>> types = builder.buildAll(srcDir);
-        assertThat(types).hasSize(4);
+        assertThat(types).hasSize(5);
 
         File outDir = new File("target/test-roundtrip");
         deleteRecursively(outDir);

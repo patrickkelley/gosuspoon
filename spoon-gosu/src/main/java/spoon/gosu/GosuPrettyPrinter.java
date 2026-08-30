@@ -1,6 +1,9 @@
 package spoon.gosu;
 
 import spoon.compiler.Environment;
+import spoon.reflect.code.CtCase;
+import spoon.reflect.code.CtCatch;
+import spoon.reflect.code.CtCatchVariable;
 import spoon.reflect.code.CtConstructorCall;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtForEach;
@@ -208,6 +211,54 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
             w.writeSpace();
         }
         w.writeSeparator("}");
+    }
+
+    /** Gosu catch clauses bind in {code name : type} order. */
+    @Override
+    public void visitCtCatch(CtCatch ctCatch) {
+        TokenWriter w = getPrinterTokenWriter();
+        w.writeKeyword("catch");
+        w.writeSpace();
+        w.writeSeparator("(");
+        CtCatchVariable<?> parameter = ctCatch.getParameter();
+        if (parameter != null) {
+            w.writeIdentifier(parameter.getSimpleName());
+            w.writeSeparator(" : ");
+            if (parameter.getType() != null) {
+                scan(parameter.getType());
+            }
+        }
+        w.writeSeparator(")");
+        w.writeSpace();
+        scan(ctCatch.getBody());
+    }
+
+    /** Gosu case labels are {@code case <expr>:} or {@code default:}. */
+    @Override
+    public <S> void visitCtCase(CtCase<S> ctCase) {
+        TokenWriter w = getPrinterTokenWriter();
+        List<CtExpression<S>> exprs = ctCase.getCaseExpressions();
+        if (exprs != null && !exprs.isEmpty()) {
+            w.writeKeyword("case");
+            w.writeSpace();
+            for (int i = 0; i < exprs.size(); i++) {
+                if (i > 0) {
+                    w.writeSeparator(",");
+                    w.writeSpace();
+                }
+                scan(exprs.get(i));
+            }
+            w.writeSeparator(":");
+        } else {
+            w.writeKeyword("default");
+            w.writeSeparator(":");
+        }
+        w.incTab();
+        for (CtStatement statement : ctCase.getStatements()) {
+            w.writeln();
+            scan(statement);
+        }
+        w.decTab();
     }
 
     private void printCommaList(List<? extends CtElement> elements) {

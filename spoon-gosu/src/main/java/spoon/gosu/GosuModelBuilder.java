@@ -35,7 +35,10 @@ import gw.lang.parser.expressions.IVarStatement;
 import gw.lang.parser.statements.IAssignmentStatement;
 import gw.lang.parser.statements.IBeanMethodCallStatement;
 import gw.lang.parser.statements.IBreakStatement;
+import gw.lang.parser.statements.ICaseClause;
+import gw.lang.parser.statements.ICatchClause;
 import gw.lang.parser.statements.IContinueStatement;
+import gw.lang.parser.statements.IDoWhileStatement;
 import gw.lang.parser.statements.IExpressionStatement;
 import gw.lang.parser.statements.IForEachStatement;
 import gw.lang.parser.statements.IFunctionStatement;
@@ -45,6 +48,9 @@ import gw.lang.parser.statements.IMemberAssignmentStatement;
 import gw.lang.parser.statements.IMethodCallStatement;
 import gw.lang.parser.statements.IReturnStatement;
 import gw.lang.parser.statements.IStatementList;
+import gw.lang.parser.statements.ISwitchStatement;
+import gw.lang.parser.statements.IThrowStatement;
+import gw.lang.parser.statements.ITryCatchFinallyStatement;
 import gw.lang.parser.statements.IWhileStatement;
 import gw.lang.reflect.IType;
 import gw.lang.reflect.gs.ICompilableType;
@@ -53,10 +59,14 @@ import spoon.reflect.code.CtArrayRead;
 import spoon.reflect.code.CtAssignment;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtBreak;
+import spoon.reflect.code.CtCase;
+import spoon.reflect.code.CtCatch;
+import spoon.reflect.code.CtCatchVariable;
 import spoon.reflect.code.CtCodeSnippetExpression;
 import spoon.reflect.code.CtConditional;
 import spoon.reflect.code.CtConstructorCall;
 import spoon.reflect.code.CtContinue;
+import spoon.reflect.code.CtDo;
 import spoon.reflect.code.CtExpression;
 import spoon.reflect.code.CtForEach;
 import spoon.reflect.code.CtIf;
@@ -66,6 +76,9 @@ import spoon.reflect.code.CtLocalVariable;
 import spoon.reflect.code.CtNewArray;
 import spoon.reflect.code.CtReturn;
 import spoon.reflect.code.CtStatement;
+import spoon.reflect.code.CtSwitch;
+import spoon.reflect.code.CtThrow;
+import spoon.reflect.code.CtTry;
 import spoon.reflect.code.CtUnaryOperator;
 import spoon.reflect.code.CtVariableAccess;
 import spoon.reflect.code.CtWhile;
@@ -375,6 +388,70 @@ public class GosuModelBuilder {
                     castBool(mapExpression(wh.getExpression(), ctWhile)));
             ctWhile.setBody(mapBodyOrStatement(wh.getStatement(), ctWhile));
             return ctWhile;
+        }
+        if (el instanceof IDoWhileStatement) {
+            IDoWhileStatement dw = (IDoWhileStatement) el;
+            CtDo ctDo = factory.createDo();
+            ctDo.setLoopingExpression(
+                    castBool(mapExpression(dw.getExpression(), ctDo)));
+            ctDo.setBody(mapBodyOrStatement(dw.getStatement(), ctDo));
+            return ctDo;
+        }
+        if (el instanceof ISwitchStatement) {
+            ISwitchStatement sw = (ISwitchStatement) el;
+            CtSwitch<Object> ctSw = factory.Core().createSwitch();
+            ctSw.setSelector(cast(mapExpression(sw.getSwitchExpression(), ctSw)));
+            for (ICaseClause clause : sw.getCases()) {
+                CtCase<Object> ctCase = factory.Core().createCase();
+                ctCase.setCaseExpression(cast(mapExpression(clause.getExpression(), ctCase)));
+                for (IStatement caseStmt : clause.getStatements()) {
+                    CtStatement mapped = mapStatementTree(caseStmt, ctCase);
+                    if (mapped != null) {
+                        ctCase.addStatement(mapped);
+                    }
+                }
+                ctSw.addCase(ctCase);
+            }
+            if (!sw.getDefaultStatements().isEmpty()) {
+                CtCase<Object> ctDefault = factory.Core().createCase();
+                ctDefault.setIncludesDefault(true);
+                for (IStatement defStmt : sw.getDefaultStatements()) {
+                    CtStatement mapped = mapStatementTree(defStmt, ctDefault);
+                    if (mapped != null) {
+                        ctDefault.addStatement(mapped);
+                    }
+                }
+                ctSw.addCase(ctDefault);
+            }
+            return ctSw;
+        }
+        if (el instanceof IThrowStatement) {
+            IThrowStatement thr = (IThrowStatement) el;
+            CtThrow ctThrow = factory.Core().createThrow();
+            ctThrow.setThrownExpression(
+                    (CtExpression<? extends Throwable>) (CtExpression<?>)
+                            mapExpression(thr.getExpression(), ctThrow));
+            return ctThrow;
+        }
+        if (el instanceof ITryCatchFinallyStatement) {
+            ITryCatchFinallyStatement tcf = (ITryCatchFinallyStatement) el;
+            CtTry ctTry = factory.Core().createTry();
+            ctTry.setBody((CtBlock<?>) mapBodyOrStatement(tcf.getTryStatement(), ctTry));
+            for (ICatchClause clause : tcf.getCatchStatements()) {
+                CtCatch ctCatch = factory.Core().createCatch();
+                CtCatchVariable<Object> variable = factory.Core().createCatchVariable();
+                ISymbol symbol = clause.getSymbol();
+                variable.setSimpleName(symbol == null ? "" : symbol.getName());
+                variable.setType(mapType(clause.getCatchType()));
+                ctCatch.setParameter((CtCatchVariable) variable);
+                ctCatch.setBody((CtBlock<?>) mapBodyOrStatement(clause.getCatchStmt(), ctCatch));
+                ctTry.addCatcher(ctCatch);
+            }
+            if (tcf.getFinallyStatement() != null) {
+                ctTry.setFinalizer((CtBlock<?>) mapBodyOrStatement(
+                        tcf.getFinallyStatement(), ctTry));
+            }
+            return ctTry;
         }
         if (el instanceof IForEachStatement) {
             IForEachStatement fe = (IForEachStatement) el;
