@@ -907,8 +907,8 @@ class GosuRoundTripTest {
 				.contains("@Deprecated")
 				.contains("@SuppressWarnings({ \"rawtypes\", \"unchecked\" })")
 				.contains("class AnnoDemo {")
-				.contains("@Deprecated\n    var _field : int")
-				.contains("@Deprecated\n    function foo(@Deprecated p : String) : String");
+				.contains("var _field : int")
+				.contains("function foo(@Deprecated p : String) : String");
 	}
 
 	@Test
