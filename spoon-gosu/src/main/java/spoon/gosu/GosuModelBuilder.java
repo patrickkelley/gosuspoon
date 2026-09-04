@@ -180,6 +180,9 @@ public class GosuModelBuilder {
 	private final Map<String, IType> currentFieldTypes = new LinkedHashMap<>();
 	private List<String> currentUses = new ArrayList<>();
 	private CharSequence currentSource;
+	private final Set<String> currentParameters = new LinkedHashSet<>();
+	private final Set<String> currentLocals = new LinkedHashSet<>();
+	private final Set<String> currentCatchVariables = new LinkedHashSet<>();
 
 	public GosuModelBuilder(Factory factory, GosuEnvironment gosu) {
 		this.factory = factory;
@@ -244,6 +247,9 @@ public class GosuModelBuilder {
 		currentFieldTypes.clear();
 		currentUses.clear();
 		currentSource = null;
+		currentParameters.clear();
+		currentLocals.clear();
+		currentCatchVariables.clear();
 
 		try {
 			CtType<?> ctType;
@@ -356,6 +362,9 @@ public class GosuModelBuilder {
 			currentFieldTypes.clear();
 			currentUses.clear();
 			currentSource = null;
+			currentParameters.clear();
+			currentLocals.clear();
+			currentCatchVariables.clear();
 		}
 	}
 
@@ -452,10 +461,18 @@ public class GosuModelBuilder {
 		if (dfs.getModifierInfo() != null) {
 			addAnnotations(dfs.getModifierInfo(), ctor);
 		}
+		currentParameters.clear();
+		currentLocals.clear();
+		currentCatchVariables.clear();
 		for (IParameterDeclaration p : decl.getParameters()) {
-			ctor.addParameter(buildParameter(p));
+			CtParameter<?> param = buildParameter(p);
+			ctor.addParameter(param);
+			currentParameters.add(param.getSimpleName());
 		}
 		ctor.setBody(buildBody(decl));
+		currentParameters.clear();
+		currentLocals.clear();
+		currentCatchVariables.clear();
 		return ctor;
 	}
 
@@ -485,14 +502,22 @@ public class GosuModelBuilder {
 		}
 		method.setSimpleName(name);
 		method.setType(mapType(dfs.getReturnType()));
+		currentParameters.clear();
+		currentLocals.clear();
+		currentCatchVariables.clear();
 		for (IParameterDeclaration p : decl.getParameters()) {
-			method.addParameter(buildParameter(p));
+			CtParameter<?> param = buildParameter(p);
+			method.addParameter(param);
+			currentParameters.add(param.getSimpleName());
 		}
 		CtBlock<?> body = buildBody(decl);
 		if (body != null && (!body.getStatements().isEmpty()
 				|| (decl.getGosuClass() != null && !decl.getGosuClass().isInterface()))) {
 			method.setBody(body);
 		}
+		currentParameters.clear();
+		currentLocals.clear();
+		currentCatchVariables.clear();
 		return method;
 	}
 
@@ -669,6 +694,9 @@ public class GosuModelBuilder {
 				variable.setSimpleName(symbol == null ? "" : symbol.getName());
 				variable.setType(mapType(clause.getCatchType()));
 				ctCatch.setParameter((CtCatchVariable) variable);
+				if (variable.getSimpleName() != null) {
+					currentCatchVariables.add(variable.getSimpleName());
+				}
 				ctCatch.setBody((CtBlock<?>) mapBodyOrStatement(clause.getCatchStmt(), ctCatch));
 				ctTry.addCatcher(ctCatch);
 			}
@@ -685,6 +713,7 @@ public class GosuModelBuilder {
 			ISymbol symbol = fe.getIdentifier();
 			var.setSimpleName(symbol == null ? "" : symbol.getName());
 			var.setType(mapType(symbol == null ? null : symbol.getType()));
+			currentLocals.add(var.getSimpleName());
 			ctFor.setVariable(var);
 			ctFor.setExpression(mapExpression(fe.getInExpression(), ctFor));
 			ctFor.setBody(mapBodyOrStatement(fe.getStatement(), ctFor));
@@ -750,6 +779,7 @@ public class GosuModelBuilder {
 			if (local.getAsExpression() != null) {
 				v.setDefaultExpression(mapExpression(local.getAsExpression(), v));
 			}
+			currentLocals.add(v.getSimpleName());
 			return v;
 		}
 		if (el instanceof IAssertStatement) {
@@ -1165,16 +1195,45 @@ public class GosuModelBuilder {
 		if (name != null && currentFields.contains(name)) {
 			return fieldAccess(name, true);
 		}
-		return variableAccess(name, symbol == null ? null : symbol.getType());
+		return variableAccess(name, symbol == null ? null : symbol.getType(), true);
 	}
 
 	private CtExpression<Object> variableAccess(String name, IType type) {
-		CtVariableReference<Object> ref = factory.createParameterReference();
-		ref.setSimpleName(name);
-		if (type != null) {
-			ref.setType(mapType(type));
+		return variableAccess(name, type, false);
+	}
+
+	private CtExpression<Object> variableAccess(String name, IType type, boolean isWrite) {
+		CtVariableReference<Object> ref;
+		if (currentCatchVariables.contains(name)) {
+			spoon.reflect.reference.CtCatchVariableReference<Object> catchRef = factory.createCatchVariableReference();
+			catchRef.setSimpleName(name);
+			if (type != null) {
+				catchRef.setType(mapType(type));
+			}
+			ref = catchRef;
+		} else if (currentLocals.contains(name)) {
+			spoon.reflect.reference.CtLocalVariableReference<Object> localRef = factory.createLocalVariableReference();
+			localRef.setSimpleName(name);
+			if (type != null) {
+				localRef.setType(mapType(type));
+			}
+			ref = localRef;
+		} else if (currentParameters.contains(name)) {
+			spoon.reflect.reference.CtParameterReference<Object> paramRef = factory.createParameterReference();
+			paramRef.setSimpleName(name);
+			if (type != null) {
+				paramRef.setType(mapType(type));
+			}
+			ref = paramRef;
+		} else {
+			spoon.reflect.reference.CtLocalVariableReference<Object> localRef = factory.createLocalVariableReference();
+			localRef.setSimpleName(name);
+			if (type != null) {
+				localRef.setType(mapType(type));
+			}
+			ref = localRef;
 		}
-		return factory.createVariableRead(ref, false);
+		return isWrite ? factory.createVariableWrite(ref, false) : factory.createVariableRead(ref, false);
 	}
 
 	private CtExpression<Object> fieldAccess(String name, boolean write) {
