@@ -270,8 +270,30 @@ public class ClassTypingContext extends AbstractTypingContext {
 				return false;
 			}
 		}
-		//TODO check method visibility following https://docs.oracle.com/javase/specs/jls/se8/html/jls-8.html#jls-8.4.8.1
+		if (thisMethod.isStatic() || thatMethod.isStatic()) {
+			return false;
+		}
+		if (thisMethod.getVisibility() == ModifierKind.PRIVATE
+				|| thatMethod.getVisibility() == ModifierKind.PRIVATE) {
+			return false;
+		}
+		if (superMethodHasMoreVisibility(thisMethod.getVisibility(), thatMethod.getVisibility())) {
+			return false;
+		}
 		return isSubSignature(thisMethod, thatMethod);
+	}
+
+	private boolean superMethodHasMoreVisibility(
+			@Nullable ModifierKind childAccessModifier,
+			@Nullable ModifierKind parentAccessModifier) {
+		if (childAccessModifier == null) {
+			return parentAccessModifier == ModifierKind.PROTECTED
+					|| parentAccessModifier == ModifierKind.PUBLIC;
+		}
+		if (childAccessModifier == ModifierKind.PROTECTED) {
+			return parentAccessModifier == ModifierKind.PUBLIC;
+		}
+		return false;
 	}
 
 	/**
