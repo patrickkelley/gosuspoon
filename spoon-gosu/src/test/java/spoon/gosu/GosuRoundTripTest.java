@@ -439,6 +439,29 @@ class GosuRoundTripTest {
 				+ "  function testEval() : Object {\n"
 				+ "    return eval(\"1 + 2\")\n"
 				+ "  }\n"
+				+ "  function testArrayAssign() : int[] {\n"
+				+ "    var arr = new int[3]\n"
+				+ "    arr[0] = 42\n"
+				+ "    return arr\n"
+				+ "  }\n"
+				+ "  function testIdentity(a : Object, b : Object) : boolean {\n"
+				+ "    return a === b && a !== b\n"
+				+ "  }\n"
+				+ "  function testBlockLambda() : int {\n"
+				+ "    var fn : block(x : int) : int = \\ x : int -> {\n"
+				+ "      var y = x + 1\n"
+				+ "      return y * 2\n"
+				+ "    }\n"
+				+ "    return fn(3)\n"
+				+ "  }\n"
+				+ "  function testScopeLeak() : int {\n"
+				+ "    if (true) {\n"
+				+ "      var scoped = 10\n"
+				+ "      print(scoped)\n"
+				+ "    }\n"
+				+ "    var scoped = 20\n"
+				+ "    return scoped\n"
+				+ "  }\n"
 				+ "}\n");
 
 		gosu = GosuEnvironment.initialize(java.util.Collections.singletonList(srcDir));
@@ -461,6 +484,7 @@ class GosuRoundTripTest {
 	void greeterModelShapeAndPrint() {
 		CtType<?> greeter = type("demo.Greeter");
 		assertThat(greeter).isNotNull();
+		assertThat(greeter.hasModifier(spoon.reflect.declaration.ModifierKind.PUBLIC)).isTrue();
 		assertThat(greeter.getPackage().getQualifiedName()).isEqualTo("demo");
 		assertThat(GosuLauncher.usesOf(builder, greeter)).containsExactly("java.util.List");
 
@@ -957,6 +981,25 @@ class GosuRoundTripTest {
 		assertThat(retEval.getReturnedExpression()).isInstanceOf(CtInvocation.class);
 		assertThat(((CtInvocation<?>) retEval.getReturnedExpression()).getExecutable().getSimpleName()).isEqualTo("eval");
 
+		CtMethod<?> testArrayAssign = spec.getMethodsByName("testArrayAssign").get(0);
+		assertThat(testArrayAssign.getBody().getStatements().get(1)).isInstanceOf(spoon.reflect.code.CtAssignment.class);
+		spoon.reflect.code.CtAssignment<?, ?> assign = (spoon.reflect.code.CtAssignment<?, ?>) testArrayAssign.getBody().getStatements().get(1);
+		assertThat(assign.getAssigned()).isInstanceOf(CtArrayRead.class);
+
+		CtMethod<?> testIdentity = spec.getMethodsByName("testIdentity").get(0);
+		CtReturn<?> retIdentity = (CtReturn<?>) testIdentity.getBody().getStatements().get(0);
+		assertThat(retIdentity.getReturnedExpression()).isInstanceOf(CtBinaryOperator.class);
+
+		CtMethod<?> testBlockLambda = spec.getMethodsByName("testBlockLambda").get(0);
+		List<CtLambda<?>> lambdas = testBlockLambda.getElements(e -> e instanceof CtLambda<?>);
+		assertThat(lambdas).hasSize(1);
+		assertThat(lambdas.get(0).getBody()).isNotNull();
+		assertThat(lambdas.get(0).getBody().getStatements()).hasSize(2);
+
+		CtMethod<?> testScopeLeak = spec.getMethodsByName("testScopeLeak").get(0);
+		CtReturn<?> retScope = (CtReturn<?>) testScopeLeak.getBody().getStatements().get(2);
+		assertThat(retScope.getReturnedExpression()).isInstanceOf(spoon.reflect.code.CtVariableRead.class);
+
 		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(spec);
 		assertThat(text)
 				.contains("using (var r : StringReader = new StringReader( \"hello\" )) {")
@@ -965,6 +1008,7 @@ class GosuRoundTripTest {
 				.contains("return typeof obj")
 				.contains("return (obj as String)")
 				.contains("for (i in 0..10) {")
+				.contains("arr[0] = 42")
 				.contains("return eval(\"1 + 2\")");
 	}
 
