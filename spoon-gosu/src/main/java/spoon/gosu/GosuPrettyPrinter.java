@@ -91,9 +91,18 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			CtTypeReference<?> superclass = enhancement
 					? enhancedTypeOf(type)
 					: type.getSuperclass();
-			if (superclass != null && !"java.lang.Object".equals(superclass.getQualifiedName())) {
+			boolean hasSuperclass = superclass != null && !"java.lang.Object".equals(superclass.getQualifiedName());
+			if (hasSuperclass) {
 				w.writeSeparator(" : ");
 				scan(superclass);
+			}
+			if (!type.getSuperInterfaces().isEmpty()) {
+				if (hasSuperclass) {
+					w.writeSeparator(", ");
+				} else {
+					w.writeSeparator(" : ");
+				}
+				printCommaList(new java.util.ArrayList<>(type.getSuperInterfaces()));
 			}
 			w.writeSpace();
 			w.writeSeparator("{");
@@ -253,6 +262,12 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			w.writeSeparator(" : ");
 			scan(method.getType());
 		}
+		if (!method.getThrownTypes().isEmpty()) {
+			w.writeSpace();
+			w.writeKeyword("throws");
+			w.writeSpace();
+			printCommaList(new java.util.ArrayList<>(method.getThrownTypes()));
+		}
 		if (method.getBody() != null) {
 			w.writeSpace();
 			scan(method.getBody());
@@ -280,6 +295,12 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeSeparator("(");
 		printCommaList(constructor.getParameters());
 		w.writeSeparator(")");
+		if (!constructor.getThrownTypes().isEmpty()) {
+			w.writeSpace();
+			w.writeKeyword("throws");
+			w.writeSpace();
+			printCommaList(new java.util.ArrayList<>(constructor.getThrownTypes()));
+		}
 		w.writeSpace();
 		scan(constructor.getBody());
 	}
@@ -410,6 +431,15 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeSeparator(")");
 		w.writeSpace();
 		scan(tryWithResource.getBody());
+		for (CtCatch catcher : tryWithResource.getCatchers()) {
+			scan(catcher);
+		}
+		if (tryWithResource.getFinalizer() != null) {
+			w.writeSpace();
+			w.writeKeyword("finally");
+			w.writeSpace();
+			scan(tryWithResource.getFinalizer());
+		}
 		exitCtStatement(tryWithResource);
 	}
 
@@ -529,7 +559,9 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeSpace();
 		w.writeOperator("->");
 		w.writeSpace();
-		if (lambda.getExpression() != null) {
+		if (lambda.getBody() != null) {
+			scan(lambda.getBody());
+		} else if (lambda.getExpression() != null) {
 			scan(lambda.getExpression());
 		}
 	}

@@ -183,6 +183,7 @@ public class GosuModelBuilder {
 	private final Set<String> currentParameters = new LinkedHashSet<>();
 	private final Set<String> currentLocals = new LinkedHashSet<>();
 	private final Set<String> currentCatchVariables = new LinkedHashSet<>();
+	private final Set<String> currentLambdaParameters = new LinkedHashSet<>();
 
 	public GosuModelBuilder(Factory factory, GosuEnvironment gosu) {
 		this.factory = factory;
@@ -250,6 +251,7 @@ public class GosuModelBuilder {
 		currentParameters.clear();
 		currentLocals.clear();
 		currentCatchVariables.clear();
+		currentLambdaParameters.clear();
 
 		try {
 			CtType<?> ctType;
@@ -308,6 +310,31 @@ public class GosuModelBuilder {
 					((CtClass<?>) ctType).setSuperclass(
 							factory.Type().createReference(superClass.getName()));
 				}
+				try {
+					IType[] interfaces = gs.getInterfaces();
+					if (interfaces != null) {
+						for (IType iface : interfaces) {
+							if (iface != null && !isGosuInternalInterface(iface)) {
+								((CtClass<?>) ctType).addSuperInterface(mapType(iface));
+							}
+						}
+					}
+				} catch (Exception ignored) {
+					// best-effort: interfaces not critical for model
+				}
+			}
+			if (ctType instanceof CtInterface<?>) {
+				try {
+					IType[] interfaces = gs.getInterfaces();
+					if (interfaces != null) {
+						for (IType iface : interfaces) {
+							if (iface != null && !isGosuInternalInterface(iface)) {
+								((CtInterface<?>) ctType).addSuperInterface(mapType(iface));
+							}
+						}
+					}
+				} catch (Exception ignored) {
+				}
 			}
 
 			currentUses = captureUses(gs.getSource());
@@ -365,6 +392,7 @@ public class GosuModelBuilder {
 			currentParameters.clear();
 			currentLocals.clear();
 			currentCatchVariables.clear();
+			currentLambdaParameters.clear();
 		}
 	}
 
@@ -390,6 +418,14 @@ public class GosuModelBuilder {
 				}
 			}
 		}
+	}
+
+	private static boolean isGosuInternalInterface(IType type) {
+		if (type == null || type.getName() == null) {
+			return true;
+		}
+		String name = type.getName();
+		return name.contains("_proxy") || name.startsWith("gw.lang.reflect.gs");
 	}
 
 	private void addEnhancedType(CtType<?> ctType, CtTypeReference<Object> enhancedType) {
@@ -464,6 +500,7 @@ public class GosuModelBuilder {
 		currentParameters.clear();
 		currentLocals.clear();
 		currentCatchVariables.clear();
+		currentLambdaParameters.clear();
 		for (IParameterDeclaration p : decl.getParameters()) {
 			CtParameter<?> param = buildParameter(p);
 			ctor.addParameter(param);
@@ -473,6 +510,7 @@ public class GosuModelBuilder {
 		currentParameters.clear();
 		currentLocals.clear();
 		currentCatchVariables.clear();
+		currentLambdaParameters.clear();
 		return ctor;
 	}
 
@@ -505,6 +543,7 @@ public class GosuModelBuilder {
 		currentParameters.clear();
 		currentLocals.clear();
 		currentCatchVariables.clear();
+		currentLambdaParameters.clear();
 		for (IParameterDeclaration p : decl.getParameters()) {
 			CtParameter<?> param = buildParameter(p);
 			method.addParameter(param);
@@ -518,6 +557,7 @@ public class GosuModelBuilder {
 		currentParameters.clear();
 		currentLocals.clear();
 		currentCatchVariables.clear();
+		currentLambdaParameters.clear();
 		return method;
 	}
 
@@ -694,10 +734,18 @@ public class GosuModelBuilder {
 				variable.setSimpleName(symbol == null ? "" : symbol.getName());
 				variable.setType(mapType(clause.getCatchType()));
 				ctCatch.setParameter((CtCatchVariable) variable);
-				if (variable.getSimpleName() != null) {
-					currentCatchVariables.add(variable.getSimpleName());
+				String catchName = variable.getSimpleName();
+				boolean added = false;
+				if (catchName != null) {
+					added = currentCatchVariables.add(catchName);
 				}
-				ctCatch.setBody((CtBlock<?>) mapBodyOrStatement(clause.getCatchStmt(), ctCatch));
+				try {
+					ctCatch.setBody((CtBlock<?>) mapBodyOrStatement(clause.getCatchStmt(), ctCatch));
+				} finally {
+					if (added) {
+						currentCatchVariables.remove(catchName);
+					}
+				}
 				ctTry.addCatcher(ctCatch);
 			}
 			if (tcf.getFinallyStatement() != null) {
@@ -713,10 +761,20 @@ public class GosuModelBuilder {
 			ISymbol symbol = fe.getIdentifier();
 			var.setSimpleName(symbol == null ? "" : symbol.getName());
 			var.setType(mapType(symbol == null ? null : symbol.getType()));
-			currentLocals.add(var.getSimpleName());
 			ctFor.setVariable(var);
 			ctFor.setExpression(mapExpression(fe.getInExpression(), ctFor));
-			ctFor.setBody(mapBodyOrStatement(fe.getStatement(), ctFor));
+			String loopVar = var.getSimpleName();
+			boolean added = false;
+			if (loopVar != null) {
+				added = currentLocals.add(loopVar);
+			}
+			try {
+				ctFor.setBody(mapBodyOrStatement(fe.getStatement(), ctFor));
+			} finally {
+				if (added) {
+					currentLocals.remove(loopVar);
+				}
+			}
 			return ctFor;
 		}
 		if (el instanceof IReturnStatement) {
@@ -996,6 +1054,13 @@ public class GosuModelBuilder {
 				thisAccess.setType(thisTypeRef());
 				return thisAccess;
 			}
+			// locals/params/catch/lambda shadow fields per JLS/Gosu scoping
+			if (name != null && (currentLambdaParameters.contains(name)
+					|| currentCatchVariables.contains(name)
+					|| currentLocals.contains(name)
+					|| currentParameters.contains(name))) {
+				return variableAccess(name, symbol == null ? null : symbol.getType());
+			}
 			boolean field = name != null
 					&& (currentFields.contains(name) || symbol instanceof MemberFieldSymbol);
 			if (field) {
@@ -1064,17 +1129,27 @@ public class GosuModelBuilder {
 
 	private CtExpression<Object> buildLambda(IBlockExpression block, CtElement context) {
 		CtLambda<Object> lambda = factory.createLambda();
+		List<String> added = new ArrayList<>();
 		for (ISymbol param : block.getArgs()) {
 			CtParameter<Object> p = factory.createParameter();
 			p.setSimpleName(param.getName());
 			p.setType(mapType(param.getType()));
 			lambda.addParameter(p);
+			if (param.getName() != null && currentLambdaParameters.add(param.getName())) {
+				added.add(param.getName());
+			}
 		}
-		IParsedElement body = block.getBody();
-		if (body instanceof gw.lang.parser.IExpression) {
-			lambda.setExpression(cast(mapExpression((gw.lang.parser.IExpression) body, lambda)));
-		} else {
-			lambda.setExpression(cast(snippet(sourceSlice(body))));
+		try {
+			IParsedElement body = block.getBody();
+			if (body instanceof gw.lang.parser.IExpression) {
+				lambda.setExpression(cast(mapExpression((gw.lang.parser.IExpression) body, lambda)));
+			} else {
+				lambda.setExpression(cast(snippet(sourceSlice(body))));
+			}
+		} finally {
+			for (String n : added) {
+				currentLambdaParameters.remove(n);
+			}
 		}
 		CtTypeReference<Object> ret = mapType(
 				((gw.lang.reflect.IFunctionType) block.getType()).getReturnType());
@@ -1192,6 +1267,12 @@ public class GosuModelBuilder {
 		if ("this".equals(name)) {
 			return factory.createThisAccess(thisTypeRef(), false);
 		}
+		if (name != null && (currentLambdaParameters.contains(name)
+				|| currentCatchVariables.contains(name)
+				|| currentLocals.contains(name)
+				|| currentParameters.contains(name))) {
+			return variableAccess(name, symbol == null ? null : symbol.getType(), true);
+		}
 		if (name != null && currentFields.contains(name)) {
 			return fieldAccess(name, true);
 		}
@@ -1204,7 +1285,14 @@ public class GosuModelBuilder {
 
 	private CtExpression<Object> variableAccess(String name, IType type, boolean isWrite) {
 		CtVariableReference<Object> ref;
-		if (currentCatchVariables.contains(name)) {
+		if (currentLambdaParameters.contains(name)) {
+			spoon.reflect.reference.CtParameterReference<Object> paramRef = factory.createParameterReference();
+			paramRef.setSimpleName(name);
+			if (type != null) {
+				paramRef.setType(mapType(type));
+			}
+			ref = paramRef;
+		} else if (currentCatchVariables.contains(name)) {
 			spoon.reflect.reference.CtCatchVariableReference<Object> catchRef = factory.createCatchVariableReference();
 			catchRef.setSimpleName(name);
 			if (type != null) {
@@ -1286,6 +1374,12 @@ public class GosuModelBuilder {
 			case "*": return BinaryOperatorKind.MUL;
 			case "/": return BinaryOperatorKind.DIV;
 			case "%": return BinaryOperatorKind.MOD;
+			case "&": return BinaryOperatorKind.BITAND;
+			case "|": return BinaryOperatorKind.BITOR;
+			case "^": return BinaryOperatorKind.BITXOR;
+			case "<<": return BinaryOperatorKind.SL;
+			case ">>": return BinaryOperatorKind.SR;
+			case ">>>": return BinaryOperatorKind.USR;
 			default: return BinaryOperatorKind.PLUS;
 		}
 	}
