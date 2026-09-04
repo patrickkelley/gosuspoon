@@ -35,6 +35,7 @@ import spoon.reflect.declaration.CtMethod;
 import spoon.reflect.declaration.CtParameter;
 import spoon.reflect.declaration.CtType;
 import spoon.reflect.declaration.CtTypeParameter;
+import spoon.reflect.declaration.ModifierKind;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.visitor.DefaultJavaPrettyPrinter;
 import spoon.reflect.visitor.TokenWriter;
@@ -184,8 +185,17 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	public <T> void visitCtField(CtField<T> field) {
 		printAnnotations(field, true);
 		TokenWriter w = getPrinterTokenWriter();
+		writeVisibility(field);
+		if (field.hasModifier(ModifierKind.ABSTRACT)) {
+			w.writeKeyword("abstract");
+			w.writeSpace();
+		}
 		if (field.isStatic()) {
 			w.writeKeyword("static");
+			w.writeSpace();
+		}
+		if (field.hasModifier(ModifierKind.FINAL)) {
+			w.writeKeyword("final");
 			w.writeSpace();
 		}
 		w.writeKeyword("var");
@@ -205,6 +215,19 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	public <T> void visitCtMethod(CtMethod<T> method) {
 		printAnnotations(method, true);
 		TokenWriter w = getPrinterTokenWriter();
+		writeVisibility(method);
+		if (method.hasModifier(ModifierKind.ABSTRACT)) {
+			w.writeKeyword("abstract");
+			w.writeSpace();
+		}
+		if (method.hasModifier(ModifierKind.STATIC)) {
+			w.writeKeyword("static");
+			w.writeSpace();
+		}
+		if (method.hasModifier(ModifierKind.FINAL)) {
+			w.writeKeyword("final");
+			w.writeSpace();
+		}
 		boolean propGet = isGosuPropertyGet(method);
 		boolean propSet = isGosuPropertySet(method);
 		if (propGet) {
@@ -240,6 +263,19 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 	public <T> void visitCtConstructor(CtConstructor<T> constructor) {
 		printAnnotations(constructor, true);
 		TokenWriter w = getPrinterTokenWriter();
+		writeVisibility(constructor);
+		if (constructor.hasModifier(ModifierKind.ABSTRACT)) {
+			w.writeKeyword("abstract");
+			w.writeSpace();
+		}
+		if (constructor.hasModifier(ModifierKind.STATIC)) {
+			w.writeKeyword("static");
+			w.writeSpace();
+		}
+		if (constructor.hasModifier(ModifierKind.FINAL)) {
+			w.writeKeyword("final");
+			w.writeSpace();
+		}
 		w.writeKeyword("construct");
 		w.writeSeparator("(");
 		printCommaList(constructor.getParameters());
@@ -611,6 +647,20 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		String name = annotation.getAnnotationType().getQualifiedName();
 		return GosuModelBuilder.GOSU_KIND_ANNOTATION.equals(name)
 				|| GosuModelBuilder.GOSU_ENHANCED_TYPE_ANNOTATION.equals(name);
+	}
+
+	private void writeVisibility(spoon.reflect.declaration.CtModifiable modifiable) {
+		TokenWriter w = getPrinterTokenWriter();
+		if (modifiable.hasModifier(ModifierKind.PUBLIC)) {
+			w.writeKeyword("public");
+			w.writeSpace();
+		} else if (modifiable.hasModifier(ModifierKind.PRIVATE)) {
+			w.writeKeyword("private");
+			w.writeSpace();
+		} else if (modifiable.hasModifier(ModifierKind.PROTECTED)) {
+			w.writeKeyword("protected");
+			w.writeSpace();
+		}
 	}
 
 	private void printCommaList(List<? extends CtElement> elements) {

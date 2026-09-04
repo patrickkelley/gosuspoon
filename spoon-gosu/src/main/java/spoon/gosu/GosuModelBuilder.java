@@ -448,6 +448,7 @@ public class GosuModelBuilder {
 	private CtConstructor<Object> buildConstructor(DynamicFunctionSymbol dfs,
 											IFunctionStatement decl) {
 		CtConstructor<Object> ctor = factory.createConstructor();
+		copyModifiers(dfs, ctor);
 		if (dfs.getModifierInfo() != null) {
 			addAnnotations(dfs.getModifierInfo(), ctor);
 		}
@@ -478,6 +479,7 @@ public class GosuModelBuilder {
 				}
 			}
 		}
+		copyModifiers(dfs, method);
 		if (dfs.getModifierInfo() != null) {
 			addAnnotations(dfs.getModifierInfo(), method);
 		}
@@ -1363,10 +1365,40 @@ public class GosuModelBuilder {
 
 	private void copyModifiers(IVarStatement source, CtModifiable target) {
 		Set<ModifierKind> mods = new LinkedHashSet<>();
-		if (source.isPrivate()) {
+		if (source.isPublic()) {
+			mods.add(ModifierKind.PUBLIC);
+		} else if (source.isPrivate()) {
 			mods.add(ModifierKind.PRIVATE);
 		} else if (source.isProtected()) {
 			mods.add(ModifierKind.PROTECTED);
+		} else if (source.isInternal()) {
+			// package-private -> no visibility modifier
+		}
+		if (source.isAbstract()) {
+			mods.add(ModifierKind.ABSTRACT);
+		}
+		if (source.isStatic()) {
+			mods.add(ModifierKind.STATIC);
+		}
+		if (source.isFinal()) {
+			mods.add(ModifierKind.FINAL);
+		}
+		target.setModifiers(mods);
+	}
+
+	private void copyModifiers(gw.internal.gosu.parser.Symbol source, CtModifiable target) {
+		Set<ModifierKind> mods = new LinkedHashSet<>();
+		if (source.isPublic()) {
+			mods.add(ModifierKind.PUBLIC);
+		} else if (source.isPrivate()) {
+			mods.add(ModifierKind.PRIVATE);
+		} else if (source.isProtected()) {
+			mods.add(ModifierKind.PROTECTED);
+		} else if (source.isInternal()) {
+			// package-private
+		}
+		if (source.isAbstract()) {
+			mods.add(ModifierKind.ABSTRACT);
 		}
 		if (source.isStatic()) {
 			mods.add(ModifierKind.STATIC);
