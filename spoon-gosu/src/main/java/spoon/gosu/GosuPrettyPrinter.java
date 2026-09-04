@@ -81,6 +81,17 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			printAnnotations(type, true);
 			TokenWriter w = getPrinterTokenWriter();
 			boolean enhancement = isGosuEnhancement(type);
+			if (!enhancement) {
+				writeVisibility(type);
+				if (type.hasModifier(ModifierKind.ABSTRACT)) {
+					w.writeKeyword("abstract");
+					w.writeSpace();
+				}
+				if (type.hasModifier(ModifierKind.FINAL)) {
+					w.writeKeyword("final");
+					w.writeSpace();
+				}
+			}
 			w.writeKeyword(enhancement ? "enhancement" : "class");
 			w.writeSpace();
 			w.writeIdentifier(stripLeadingDigits(type.getSimpleName()));
@@ -121,6 +132,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		getContext().pushCurrentThis(intrface);
 		printAnnotations(intrface, true);
 		TokenWriter w = getPrinterTokenWriter();
+		writeVisibility(intrface);
 		boolean structure = isGosuStructure(intrface);
 		w.writeKeyword(structure ? "structure" : "interface");
 		w.writeSpace();
@@ -147,6 +159,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		getContext().pushCurrentThis(ctEnum);
 		printAnnotations(ctEnum, true);
 		TokenWriter w = getPrinterTokenWriter();
+		writeVisibility(ctEnum);
 		w.writeKeyword("enum");
 		w.writeSpace();
 		w.writeIdentifier(stripLeadingDigits(ctEnum.getSimpleName()));
@@ -178,6 +191,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		getContext().pushCurrentThis(annotationType);
 		TokenWriter w = getPrinterTokenWriter();
 		printAnnotations(annotationType, true);
+		writeVisibility(annotationType);
 		w.writeKeyword("annotation");
 		w.writeSpace();
 		w.writeIdentifier(stripLeadingDigits(annotationType.getSimpleName()));

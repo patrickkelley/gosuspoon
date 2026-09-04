@@ -26,6 +26,7 @@ import gw.lang.parser.expressions.IConditionalExpression;
 import gw.lang.parser.expressions.IConditionalOrExpression;
 import gw.lang.parser.expressions.IConditionalTernaryExpression;
 import gw.lang.parser.expressions.IEqualityExpression;
+import gw.lang.parser.expressions.IIdentityExpression;
 import gw.lang.parser.expressions.IIdentifierExpression;
 import gw.lang.parser.expressions.IImplicitTypeAsExpression;
 import gw.lang.parser.expressions.IIntervalExpression;
@@ -42,6 +43,7 @@ import gw.lang.parser.expressions.ITypeAsExpression;
 import gw.lang.parser.expressions.IUnaryExpression;
 import gw.lang.parser.expressions.IUnaryNotPlusMinusExpression;
 import gw.lang.parser.expressions.IVarStatement;
+import gw.lang.parser.statements.IArrayAssignmentStatement;
 import gw.lang.parser.statements.IAssertStatement;
 import gw.lang.parser.statements.IAssignmentStatement;
 import gw.lang.parser.statements.IBeanMethodCallStatement;
@@ -282,6 +284,7 @@ public class GosuModelBuilder {
 			}
 
 			ctType.setSimpleName(simpleName);
+			copyModifiers(gs.getModifiers(), ctType);
 			if (gs.getGenericTypeVariables() != null) {
 				for (IGenericTypeVariable gtv : gs.getGenericTypeVariables()) {
 					ctType.addFormalCtTypeParameter(buildTypeParameter(gtv));
@@ -764,15 +767,24 @@ public class GosuModelBuilder {
 			ctFor.setVariable(var);
 			ctFor.setExpression(mapExpression(fe.getInExpression(), ctFor));
 			String loopVar = var.getSimpleName();
+			ISymbol idxSym = fe.getIndexIdentifier();
+			String idxVar = idxSym == null ? null : idxSym.getName();
 			boolean added = false;
+			boolean addedIdx = false;
 			if (loopVar != null) {
 				added = currentLocals.add(loopVar);
+			}
+			if (idxVar != null) {
+				addedIdx = currentLocals.add(idxVar);
 			}
 			try {
 				ctFor.setBody(mapBodyOrStatement(fe.getStatement(), ctFor));
 			} finally {
 				if (added) {
 					currentLocals.remove(loopVar);
+				}
+				if (addedIdx) {
+					currentLocals.remove(idxVar);
 				}
 			}
 			return ctFor;
@@ -809,6 +821,18 @@ public class GosuModelBuilder {
 			CtArrayRead<Object> lhs = factory.createArrayRead();
 			lhs.setTarget(mapExpression(acc.getRootExpression(), lhs));
 			lhs.setIndexExpression(castInt(mapExpression(acc.getKeyExpression(), lhs)));
+			lhs.setType(mapType(acc.getType()));
+			CtAssignment<Object, Object> a = factory.createAssignment();
+			a.setAssigned(lhs);
+			a.setAssignment(cast(mapExpression(assign.getExpression(), a)));
+			return a;
+		}
+		if (el instanceof IArrayAssignmentStatement) {
+			IArrayAssignmentStatement assign = (IArrayAssignmentStatement) el;
+			gw.lang.parser.expressions.IArrayAccessExpression acc = assign.getArrayAccessExpression();
+			CtArrayRead<Object> lhs = factory.createArrayRead();
+			lhs.setTarget(mapExpression(acc.getRootExpression(), lhs));
+			lhs.setIndexExpression(castInt(mapExpression(acc.getMemberExpression(), lhs)));
 			lhs.setType(mapType(acc.getType()));
 			CtAssignment<Object, Object> a = factory.createAssignment();
 			a.setAssigned(lhs);
@@ -853,27 +877,33 @@ public class GosuModelBuilder {
 			gw.internal.gosu.parser.statements.UsingStatement us =
 					(gw.internal.gosu.parser.statements.UsingStatement) el;
 			CtTryWithResource ctTry = factory.createTryWithResource();
-			if (us.getVarStatements() != null) {
-				for (IStatement v : us.getVarStatements()) {
-					CtStatement mapped = mapStatementTree(v, ctTry);
-					if (mapped instanceof CtLocalVariable<?>) {
-						ctTry.addResource((CtLocalVariable<?>) mapped);
+			Set<String> saved = new LinkedHashSet<>(currentLocals);
+			try {
+				if (us.getVarStatements() != null) {
+					for (IStatement v : us.getVarStatements()) {
+						CtStatement mapped = mapStatementTree(v, ctTry);
+						if (mapped instanceof CtLocalVariable<?>) {
+							ctTry.addResource((CtLocalVariable<?>) mapped);
+						}
 					}
 				}
-			}
-			if (us.getExpression() != null) {
-				CtExpression<?> expr = mapExpression(us.getExpression(), ctTry);
-				if (expr instanceof CtResource<?>) {
-					ctTry.addResource((CtResource<?>) expr);
-				} else if (expr != null) {
-					CtLocalVariable<Object> wrap = factory.createLocalVariable();
-					wrap.setImplicit(true);
-					wrap.setDefaultExpression(cast(expr));
-					wrap.setType(expr.getType());
-					ctTry.addResource(wrap);
+				if (us.getExpression() != null) {
+					CtExpression<?> expr = mapExpression(us.getExpression(), ctTry);
+					if (expr instanceof CtResource<?>) {
+						ctTry.addResource((CtResource<?>) expr);
+					} else if (expr != null) {
+						CtLocalVariable<Object> wrap = factory.createLocalVariable();
+						wrap.setImplicit(true);
+						wrap.setDefaultExpression(cast(expr));
+						wrap.setType(expr.getType());
+						ctTry.addResource(wrap);
+					}
 				}
+				ctTry.setBody(mapBodyOrStatement(us.getStatement(), ctTry));
+			} finally {
+				currentLocals.clear();
+				currentLocals.addAll(saved);
 			}
-			ctTry.setBody(mapBodyOrStatement(us.getStatement(), ctTry));
 			return ctTry;
 		}
 		if (el instanceof gw.internal.gosu.parser.statements.EvalStatement) {
@@ -892,28 +922,51 @@ public class GosuModelBuilder {
 	}
 
 	private CtStatement mapBodyOrStatement(IStatement body, CtElement context) {
-		CtBlock<Object> block = factory.createBlock();
-		IStatement[] statements = body instanceof IStatementList
-				? ((IStatementList) body).getStatements()
-				: new IStatement[]{body};
-		for (IStatement child : statements) {
-			CtStatement mapped = mapStatementTree(child, block);
-			if (mapped != null) {
-				block.addStatement(mapped);
+		Set<String> saved = new LinkedHashSet<>(currentLocals);
+		try {
+			CtBlock<Object> block = factory.createBlock();
+			IStatement[] statements = body instanceof IStatementList
+					? ((IStatementList) body).getStatements()
+					: new IStatement[]{body};
+			if (statements != null) {
+				for (IStatement child : statements) {
+					if (child == null) {
+						continue;
+					}
+					CtStatement mapped = mapStatementTree(child, block);
+					if (mapped != null) {
+						block.addStatement(mapped);
+					}
+				}
 			}
+			return block;
+		} finally {
+			currentLocals.clear();
+			currentLocals.addAll(saved);
 		}
-		return block;
 	}
 
 	private CtBlock<?> mapBlock(IStatementList list) {
-		CtBlock<Object> block = factory.createBlock();
-		for (IStatement child : list.getStatements()) {
-			CtStatement mapped = mapStatementTree(child, block);
-			if (mapped != null) {
-				block.addStatement(mapped);
+		Set<String> saved = new LinkedHashSet<>(currentLocals);
+		try {
+			CtBlock<Object> block = factory.createBlock();
+			IStatement[] stmts = list.getStatements();
+			if (stmts != null) {
+				for (IStatement child : stmts) {
+					if (child == null) {
+						continue;
+					}
+					CtStatement mapped = mapStatementTree(child, block);
+					if (mapped != null) {
+						block.addStatement(mapped);
+					}
+				}
 			}
+			return block;
+		} finally {
+			currentLocals.clear();
+			currentLocals.addAll(saved);
 		}
-		return block;
 	}
 
 	// ------------------------------------------------------------------
@@ -1011,6 +1064,11 @@ public class GosuModelBuilder {
 		if (el instanceof IEqualityExpression) {
 			IEqualityExpression eq = (IEqualityExpression) el;
 			return binary(eq, eq.isEquals() ? BinaryOperatorKind.EQ : BinaryOperatorKind.NE,
+					context);
+		}
+		if (el instanceof IIdentityExpression) {
+			IIdentityExpression id = (IIdentityExpression) el;
+			return binary(id, id.isEquals() ? BinaryOperatorKind.EQ : BinaryOperatorKind.NE,
 					context);
 		}
 		if (el instanceof IRelationalExpression) {
@@ -1143,8 +1201,45 @@ public class GosuModelBuilder {
 			IParsedElement body = block.getBody();
 			if (body instanceof gw.lang.parser.IExpression) {
 				lambda.setExpression(cast(mapExpression((gw.lang.parser.IExpression) body, lambda)));
-			} else {
-				lambda.setExpression(cast(snippet(sourceSlice(body))));
+			} else if (body instanceof IStatementList) {
+				Set<String> savedLocals = new LinkedHashSet<>(currentLocals);
+				try {
+					CtBlock<Object> lb = factory.createBlock();
+					IStatement[] stmts = ((IStatementList) body).getStatements();
+					if (stmts != null) {
+						for (IStatement s : stmts) {
+							if (s == null) {
+								continue;
+							}
+							CtStatement mapped = mapStatementTree(s, lb);
+							if (mapped != null) {
+								lb.addStatement(mapped);
+							}
+						}
+					}
+					lambda.setBody(lb);
+				} finally {
+					currentLocals.clear();
+					currentLocals.addAll(savedLocals);
+				}
+			} else if (body instanceof IStatement) {
+				Set<String> savedLocals = new LinkedHashSet<>(currentLocals);
+				try {
+					CtBlock<Object> lb = factory.createBlock();
+					CtStatement mapped = mapStatementTree((IStatement) body, lb);
+					if (mapped != null) {
+						lb.addStatement(mapped);
+					}
+					lambda.setBody(lb);
+				} finally {
+					currentLocals.clear();
+					currentLocals.addAll(savedLocals);
+				}
+			} else if (body != null) {
+				String slice = sourceSlice(body);
+				if (slice != null) {
+					lambda.setExpression(cast(snippet(slice)));
+				}
 			}
 		} finally {
 			for (String n : added) {
@@ -1179,6 +1274,14 @@ public class GosuModelBuilder {
 				arr.addElement(cast(mapExpression(item, arr)));
 			}
 			return arr;
+		}
+		if (nw.getSizeExpressions() != null && !nw.getSizeExpressions().isEmpty()) {
+			String slice = sourceSlice(nw);
+			if (slice != null) {
+				CtExpression<Object> s = snippet(slice);
+				s.setType(mapType(nw.getType()));
+				return s;
+			}
 		}
 		IType meta = nw.getTypeLiteral() == null || nw.getTypeLiteral().getType() == null
 				? null
@@ -1557,6 +1660,27 @@ public class GosuModelBuilder {
 			mods.add(ModifierKind.STATIC);
 		}
 		if (source.isFinal()) {
+			mods.add(ModifierKind.FINAL);
+		}
+		target.setModifiers(mods);
+	}
+
+	private void copyModifiers(int modifiers, CtModifiable target) {
+		Set<ModifierKind> mods = new LinkedHashSet<>();
+		if (java.lang.reflect.Modifier.isPublic(modifiers)) {
+			mods.add(ModifierKind.PUBLIC);
+		} else if (java.lang.reflect.Modifier.isPrivate(modifiers)) {
+			mods.add(ModifierKind.PRIVATE);
+		} else if (java.lang.reflect.Modifier.isProtected(modifiers)) {
+			mods.add(ModifierKind.PROTECTED);
+		}
+		if (java.lang.reflect.Modifier.isAbstract(modifiers)) {
+			mods.add(ModifierKind.ABSTRACT);
+		}
+		if (java.lang.reflect.Modifier.isStatic(modifiers)) {
+			mods.add(ModifierKind.STATIC);
+		}
+		if (java.lang.reflect.Modifier.isFinal(modifiers)) {
 			mods.add(ModifierKind.FINAL);
 		}
 		target.setModifiers(mods);
