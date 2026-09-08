@@ -39,6 +39,9 @@ import gw.lang.parser.expressions.IParameterDeclaration;
 import gw.lang.parser.expressions.IParenthesizedExpression;
 import gw.lang.parser.expressions.IRelationalExpression;
 import gw.lang.parser.expressions.IStringLiteralExpression;
+import gw.lang.parser.expressions.IFeatureLiteralExpression;
+import gw.lang.parser.expressions.ITemplateStringLiteral;
+import gw.lang.parser.expressions.ITypeLiteralExpression;
 import gw.lang.parser.expressions.ITypeAsExpression;
 import gw.lang.parser.expressions.IUnaryExpression;
 import gw.lang.parser.expressions.IUnaryNotPlusMinusExpression;
@@ -1179,6 +1182,24 @@ public class GosuModelBuilder {
 		if (el instanceof IBlockInvocation) {
 			// A direct block call (b(3)) is not a member invocation; keep it verbatim.
 			return snippet(sourceSlice(el));
+		}
+		if (el instanceof IFeatureLiteralExpression) {
+			CtExpression<Object> s = snippet(sourceSlice(el));
+			s.setType(mapType(((gw.lang.parser.IExpression) el).getType()));
+			return s;
+		}
+		if (el instanceof ITemplateStringLiteral) {
+			CtExpression<Object> s = snippet(sourceSlice(el));
+			IType templateType = ((gw.lang.parser.IExpression) el).getType();
+			s.setType(templateType == null ? factory.Type().stringType() : mapType(templateType));
+			return s;
+		}
+		if (el instanceof ITypeLiteralExpression) {
+			IType literalType = ((ITypeLiteralExpression) el).getType();
+			if (literalType instanceof gw.lang.reflect.IMetaType) {
+				literalType = ((gw.lang.reflect.IMetaType) literalType).getType();
+			}
+			return cast(factory.Code().createTypeAccess(mapType(literalType)));
 		}
 		throw new UnsupportedOperationException(
 				"unsupported Gosu expression " + el.getClass().getName()
