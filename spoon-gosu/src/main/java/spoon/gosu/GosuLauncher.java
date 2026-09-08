@@ -12,7 +12,10 @@ import spoon.reflect.declaration.CtImport;
 import spoon.reflect.declaration.CtImportKind;
 import spoon.reflect.declaration.CtType;
 import spoon.reflect.factory.Factory;
+import spoon.reflect.reference.CtExecutableReference;
+import spoon.reflect.reference.CtFieldReference;
 import spoon.reflect.reference.CtPackageReference;
+import spoon.reflect.reference.CtTypeMemberWildcardImportReference;
 import spoon.reflect.reference.CtTypeReference;
 
 import java.io.File;
@@ -102,6 +105,17 @@ public final class GosuLauncher {
 			if (imp.getImportKind() == CtImportKind.ALL_TYPES
 					&& imp.getReference() instanceof CtPackageReference) {
 				uses.add(((CtPackageReference) imp.getReference()).getQualifiedName() + ".*");
+			} else if (imp.getImportKind() == CtImportKind.ALL_STATIC_MEMBERS
+					&& imp.getReference() instanceof CtTypeMemberWildcardImportReference) {
+				CtTypeReference<?> wildcardType =
+						((CtTypeMemberWildcardImportReference) imp.getReference()).getTypeReference();
+				uses.add(wildcardType.getQualifiedName() + ".*");
+			} else if (imp.getReference() instanceof CtFieldReference) {
+				CtFieldReference<?> field = (CtFieldReference<?>) imp.getReference();
+				uses.add(field.getDeclaringType().getQualifiedName() + "." + field.getSimpleName());
+			} else if (imp.getReference() instanceof CtExecutableReference) {
+				CtExecutableReference<?> exec = (CtExecutableReference<?>) imp.getReference();
+				uses.add(exec.getDeclaringType().getQualifiedName() + "." + exec.getSimpleName());
 			} else if (imp.getReference() instanceof CtTypeReference) {
 				uses.add(((CtTypeReference<?>) imp.getReference()).getQualifiedName());
 			}

@@ -31,6 +31,7 @@ import gw.lang.parser.expressions.IIdentifierExpression;
 import gw.lang.parser.expressions.IImplicitTypeAsExpression;
 import gw.lang.parser.expressions.IIntervalExpression;
 import gw.lang.parser.expressions.IMapAccessExpression;
+import gw.lang.parser.expressions.IMapInitializerExpression;
 import gw.lang.parser.expressions.IMemberAccessExpression;
 import gw.lang.parser.expressions.INewExpression;
 import gw.lang.parser.expressions.INullExpression;
@@ -766,7 +767,12 @@ public class GosuModelBuilder {
 			CtLocalVariable<Object> var = factory.createLocalVariable();
 			ISymbol symbol = fe.getIdentifier();
 			var.setSimpleName(symbol == null ? "" : symbol.getName());
-			var.setType(mapType(symbol == null ? null : symbol.getType()));
+			CtTypeReference<Object> loopType = mapType(symbol == null ? null : symbol.getType());
+			// Gosu always infers loop variable types (an explicit declaration
+			// is a parse issue), so mark them implicit to preserve round-trip
+			// output; only hand-built models carry explicit types.
+			loopType.setImplicit(true);
+			var.setType(loopType);
 			ctFor.setVariable(var);
 			ctFor.setExpression(mapExpression(fe.getInExpression(), ctFor));
 			String loopVar = var.getSimpleName();
@@ -1295,6 +1301,14 @@ public class GosuModelBuilder {
 				arr.addElement(cast(mapExpression(item, arr)));
 			}
 			return arr;
+		}
+		if (nw.getInitializer() instanceof IMapInitializerExpression) {
+			String slice = sourceSlice(nw);
+			if (slice != null) {
+				CtExpression<Object> s = snippet(slice);
+				s.setType(mapType(nw.getType()));
+				return s;
+			}
 		}
 		if (nw.getSizeExpressions() != null && !nw.getSizeExpressions().isEmpty()) {
 			String slice = sourceSlice(nw);

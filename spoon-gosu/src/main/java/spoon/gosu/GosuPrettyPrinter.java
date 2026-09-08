@@ -36,6 +36,7 @@ import spoon.reflect.declaration.CtParameter;
 import spoon.reflect.declaration.CtType;
 import spoon.reflect.declaration.CtTypeParameter;
 import spoon.reflect.declaration.ModifierKind;
+import spoon.reflect.reference.CtArrayTypeReference;
 import spoon.reflect.reference.CtTypeReference;
 import spoon.reflect.visitor.DefaultJavaPrettyPrinter;
 import spoon.reflect.visitor.TokenWriter;
@@ -66,6 +67,12 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		reset();
 		type.accept(this);
 		return getResult();
+	}
+
+	@Override
+	public void reset() {
+		super.reset();
+		gosuParenthesed.clear();
 	}
 
 	/** Gosu has no statement-terminating semicolons. */
@@ -163,6 +170,10 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		w.writeKeyword("enum");
 		w.writeSpace();
 		w.writeIdentifier(stripLeadingDigits(ctEnum.getSimpleName()));
+		if (!ctEnum.getSuperInterfaces().isEmpty()) {
+			w.writeSeparator(" : ");
+			printCommaList(new java.util.ArrayList<>(ctEnum.getSuperInterfaces()));
+		}
 		w.writeSpace();
 		w.writeSeparator("{");
 		w.incTab();
@@ -293,18 +304,6 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		printAnnotations(constructor, true);
 		TokenWriter w = getPrinterTokenWriter();
 		writeVisibility(constructor);
-		if (constructor.hasModifier(ModifierKind.ABSTRACT)) {
-			w.writeKeyword("abstract");
-			w.writeSpace();
-		}
-		if (constructor.hasModifier(ModifierKind.STATIC)) {
-			w.writeKeyword("static");
-			w.writeSpace();
-		}
-		if (constructor.hasModifier(ModifierKind.FINAL)) {
-			w.writeKeyword("final");
-			w.writeSpace();
-		}
 		w.writeKeyword("construct");
 		w.writeSeparator("(");
 		printCommaList(constructor.getParameters());
@@ -324,7 +323,12 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		printAnnotations(parameter, false);
 		getPrinterTokenWriter().writeIdentifier(parameter.getSimpleName());
 		getPrinterTokenWriter().writeSeparator(" : ");
-		scan(parameter.getType());
+		if (parameter.isVarArgs() && parameter.getType() instanceof CtArrayTypeReference) {
+			scan(((CtArrayTypeReference<?>) parameter.getType()).getComponentType());
+			getPrinterTokenWriter().writeSeparator("...");
+		} else {
+			scan(parameter.getType());
+		}
 	}
 
 	@Override
@@ -336,6 +340,10 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		CtLocalVariable<?> variable = foreach.getVariable();
 		if (variable != null) {
 			w.writeIdentifier(variable.getSimpleName());
+			if (variable.getType() != null && !variable.getType().isImplicit()) {
+				w.writeSeparator(" : ");
+				scan(variable.getType());
+			}
 		}
 		w.writeSpace();
 		w.writeKeyword("in");
@@ -366,7 +374,6 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 			w.writeSpace();
 			scan(localVariable.getDefaultExpression());
 		}
-		w.writeSeparator(";");
 	}
 
 	@Override
@@ -420,7 +427,16 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 		if (parameter != null) {
 			w.writeIdentifier(parameter.getSimpleName());
 			w.writeSeparator(" : ");
-			if (parameter.getType() != null) {
+			if (parameter.getMultiTypes() != null && !parameter.getMultiTypes().isEmpty()) {
+				for (int i = 0; i < parameter.getMultiTypes().size(); i++) {
+					scan(parameter.getMultiTypes().get(i));
+					if (i < parameter.getMultiTypes().size() - 1) {
+						w.writeSpace();
+						w.writeSeparator("|");
+						w.writeSpace();
+					}
+				}
+			} else if (parameter.getType() != null) {
 				scan(parameter.getType());
 			}
 		}
@@ -650,7 +666,7 @@ public class GosuPrettyPrinter extends DefaultJavaPrettyPrinter {
 				for (Map.Entry<String, ?> entry : annotation.getValues().entrySet()) {
 					spoon.reflect.code.CtExpression<?> val =
 							(spoon.reflect.code.CtExpression<?>) entry.getValue();
-					if (entry.getKey().startsWith("param")) {
+					if (entry.getKey().matches("^param\\d+$")) {
 						scan(val);
 					} else {
 						w.writeIdentifier(entry.getKey());

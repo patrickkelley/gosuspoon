@@ -80,4 +80,18 @@ class GosuEnvironmentTest {
 
 		assertThat(names).isEmpty();
 	}
+
+	@Test
+	void testScanTypeNamesWithSymlinkCycle() throws Exception {
+		Path root = tempDir.resolve("cycle-demo");
+		Path sub = root.resolve("sub");
+		Files.createDirectories(sub);
+		Files.writeString(sub.resolve("Real.gs"), "package demo\nclass Real {}\n", StandardCharsets.UTF_8);
+		Files.createSymbolicLink(sub.resolve("loop"), root);
+
+		GosuEnvironment env = GosuEnvironment.initialize(Collections.singletonList(root.toFile()));
+		List<String> names = env.scanTypeNames(root.toFile());
+
+		assertThat(names).containsExactly("demo.Real");
+	}
 }

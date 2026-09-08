@@ -137,6 +137,23 @@ class GosuLauncherTest {
 	}
 
 	@Test
+	void testUsesOfStaticImports() {
+		Factory factory = new Launcher().getFactory();
+		GosuEnvironment gosu = GosuEnvironment.initialize(List.of(srcDir));
+		GosuModelBuilder builder = new GosuModelBuilder(factory, gosu);
+		CtType<?> dummy = factory.createClass("demo.Dummy");
+		spoon.reflect.reference.CtTypeReference<?> mathRef =
+				factory.Type().createReference("java.lang.Math");
+		builder.getTypeImports().put(dummy, List.of(
+				factory.createImport(factory.Type().createTypeMemberWildcardImportReference(mathRef)),
+				factory.createImport(factory.Field().createReference(
+						mathRef, factory.Type().doublePrimitiveType(), "PI"))));
+
+		List<String> uses = GosuLauncher.usesOf(builder, dummy);
+		assertThat(uses).contains("java.lang.Math.*", "java.lang.Math.PI");
+	}
+
+	@Test
 	void testLauncherUsesOf() {
 		Factory factory = new Launcher().getFactory();
 		GosuEnvironment gosu = GosuEnvironment.initialize(List.of(srcDir));
