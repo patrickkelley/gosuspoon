@@ -1559,22 +1559,43 @@ public class GosuModelBuilder {
 	}
 
 	/** Creates a type reference from a possibly generic name, with real type args. */
-	@SuppressWarnings("unchecked")
 	private <T> CtTypeReference<T> createGenericRef(String name) {
+		return createGenericRef(factory, name);
+	}
+
+	/** Testable static worker that preserves array dimensions on generic types. */
+	@SuppressWarnings("unchecked")
+	static <T> CtTypeReference<T> createGenericRef(Factory factory, String name) {
 		if (name == null) {
 			return (CtTypeReference<T>) factory.Type().createReference("java.lang.Object");
 		}
-		int lt = name.indexOf('<');
-		if (lt < 0) {
-			return (CtTypeReference<T>) factory.Type().createReference(name);
+		String stripped = name.trim();
+		int dims = 0;
+		while (stripped.endsWith("[]")) {
+			dims++;
+			stripped = stripped.substring(0, stripped.length() - 2).trim();
 		}
-		String base = name.substring(0, lt).trim();
-		String inner = name.substring(lt + 1, name.lastIndexOf('>'));
+		if (stripped.isEmpty()) {
+			return (CtTypeReference<T>) factory.Type().createReference("java.lang.Object");
+		}
+		int lt = stripped.indexOf('<');
+		if (lt < 0) {
+			CtTypeReference<?> base = factory.Type().createReference(stripped);
+			if (dims == 0) {
+				return (CtTypeReference<T>) base;
+			}
+			return (CtTypeReference<T>) factory.Type().createArrayReference(base, dims);
+		}
+		String base = stripped.substring(0, lt).trim();
+		String inner = stripped.substring(lt + 1, stripped.lastIndexOf('>'));
 		CtTypeReference<Object> ref = factory.Type().createReference(base);
 		for (String part : splitGenericArgs(inner)) {
-			ref.addActualTypeArgument(createGenericRef(part));
+			ref.addActualTypeArgument(createGenericRef(factory, part));
 		}
-		return (CtTypeReference<T>) (CtTypeReference<?>) ref;
+		if (dims == 0) {
+			return (CtTypeReference<T>) (CtTypeReference<?>) ref;
+		}
+		return (CtTypeReference<T>) factory.Type().createArrayReference(ref, dims);
 	}
 
 	private static List<String> splitGenericArgs(String inner) {
