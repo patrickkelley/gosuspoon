@@ -107,18 +107,27 @@ public final class GosuEnvironment implements AutoCloseable {
 	*/
 	public List<String> scanTypeNames(File sourceDir) {
 		List<String> names = new ArrayList<>();
-		collect(sourceDir, sourceDir, names);
+		collect(sourceDir, sourceDir, names, new java.util.HashSet<java.nio.file.Path>());
 		return names;
 	}
 
-	private static void collect(File root, File dir, List<String> out) {
+	private static void collect(File root, File dir, List<String> out, java.util.Set<java.nio.file.Path> visited) {
+		java.nio.file.Path realDir;
+		try {
+			realDir = dir.toPath().toRealPath();
+		} catch (IOException e) {
+			return;
+		}
+		if (!visited.add(realDir)) {
+			return;
+		}
 		File[] files = dir.listFiles();
 		if (files == null) {
 			return;
 		}
 		for (File f : files) {
 			if (f.isDirectory()) {
-				collect(root, f, out);
+				collect(root, f, out, visited);
 			} else if (f.getName().endsWith(".gs") || f.getName().endsWith(".gsx")) {
 				out.add(fullyQualifiedName(root, f));
 			}

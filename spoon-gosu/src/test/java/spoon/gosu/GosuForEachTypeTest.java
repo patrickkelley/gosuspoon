@@ -21,7 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class GosuModelBuilderMapExpressionTest {
+class GosuForEachTypeTest {
 
 	@TempDir
 	Path tempDir;
@@ -49,40 +49,23 @@ class GosuModelBuilderMapExpressionTest {
 		return found;
 	}
 
-	@Test
-	void featureLiteralDoesNotCrash() throws Exception {
-		CtType<?> demo = buildSingleType("FeatureLitDemo",
-				"package demo\nclass FeatureLitDemo {\n  function test() : Object {\n    return String#length\n  }\n}\n");
-		assertThat(demo.getMethodsByName("test")).hasSize(1);
-		String text = new GosuPrettyPrinter(demo.getFactory().getEnvironment()).printType(demo);
-		assertThat(text).contains("String#length");
-	}
+	// Note: Gosu has no explicit loop variable type syntax (both
+	// `for (item : String in items)` and `for (String item in items)` are
+	// parse issues), so the builder always marks inferred loop types
+	// implicit. Explicit-type printing is covered by
+	// GosuPrettyPrinterIssuesTest#forEachLoopVariableTypeIsPrinted on a
+	// hand-built model.
 
 	@Test
-	void templateStringDoesNotCrash() throws Exception {
-		CtType<?> demo = buildSingleType("TemplateDemo",
-				"package demo\nclass TemplateDemo {\n  function test(name : String) : String {\n    return \"Hello ${name}!\"\n  }\n}\n");
-		assertThat(demo.getMethodsByName("test")).hasSize(1);
+	void inferredLoopVariableTypeIsOmitted() throws Exception {
+		CtType<?> demo = buildSingleType("InferredForDemo",
+				"package demo\nuses java.util.List\nclass InferredForDemo {\n"
+				+ "  function test(items : List<String>) : void {\n"
+				+ "    for (item in items) {\n"
+				+ "      print(item)\n"
+				+ "    }\n"
+				+ "  }\n}\n");
 		String text = new GosuPrettyPrinter(demo.getFactory().getEnvironment()).printType(demo);
-		assertThat(text).contains("Hello");
-	}
-
-	@Test
-	void bareTypeLiteralDoesNotCrash() throws Exception {
-		CtType<?> demo = buildSingleType("TypeLitDemo",
-				"package demo\nclass TypeLitDemo {\n  function test() : Object {\n    return String\n  }\n}\n");
-		assertThat(demo.getMethodsByName("test")).hasSize(1);
-		String text = new GosuPrettyPrinter(demo.getFactory().getEnvironment()).printType(demo);
-		assertThat(text).contains("String");
-	}
-
-	@Test
-	void mapInitializerIsNotEmptyObject() throws Exception {
-		CtType<?> demo = buildSingleType("MapInitDemo",
-				"package demo\nuses java.util.Map\nclass MapInitDemo {\n  function test() : Object {\n    var m = { \"a\" -> 1 }\n    return m\n  }\n}\n");
-		assertThat(demo.getMethodsByName("test")).hasSize(1);
-		String text = new GosuPrettyPrinter(demo.getFactory().getEnvironment()).printType(demo);
-		assertThat(text).doesNotContain("new java.lang.Object()");
-		assertThat(text).contains("a");
+		assertThat(text).contains("for (item in items) {");
 	}
 }

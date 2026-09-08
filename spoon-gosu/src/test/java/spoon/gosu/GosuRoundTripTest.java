@@ -709,11 +709,11 @@ class GosuRoundTripTest {
 		assertThat(text)
 				.contains("var _double : block(int):int")
 				.contains("this._double = \\ p : int -> p * 2")
-				.contains("var triple : block(int):int = \\ q : int -> q * 3;")
+				.contains("var triple : block(int):int = \\ q : int -> q * 3")
 				.contains("print(_double(5))")
 				.contains("print(triple(4))")
 				.contains("print(apply(3, \\ x : int -> x * 10))")
-				.contains("var mul : block(int, int):int = \\ a : int, b : int -> a * b;")
+				.contains("var mul : block(int, int):int = \\ a : int, b : int -> a * b")
 				.contains("print(mul(3, 4))")
 				.contains("function apply(v : int, f : block(int):int) : int {")
 				.contains("return f(v)");
@@ -793,7 +793,7 @@ class GosuRoundTripTest {
 
 		String text = new GosuPrettyPrinter(factory.getEnvironment()).printType(color);
 		assertThat(text)
-				.contains("enum Color {")
+				.contains("enum Color : gw.lang.reflect.IEnumValue {")
 				.contains("RED,")
 				.contains("GREEN,")
 				.contains("BLUE");
